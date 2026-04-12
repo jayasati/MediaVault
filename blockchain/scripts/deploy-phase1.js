@@ -47,12 +47,21 @@ async function main() {
   console.log("  PrescriptionManager deployed to:", prescriptionManagerAddress);
 
   // 5. Deploy EmergencyAccess (needs PatientRegistry address)
-  console.log("\n[5/5] Deploying EmergencyAccess...");
+  console.log("\n[5/6] Deploying EmergencyAccess...");
   const EmergencyAccess = await hre.ethers.getContractFactory("EmergencyAccess");
   const emergencyAccess = await EmergencyAccess.deploy(patientRegistryAddress);
   await emergencyAccess.waitForDeployment();
   const emergencyAccessAddress = await emergencyAccess.getAddress();
   console.log("  EmergencyAccess deployed to:", emergencyAccessAddress);
+
+  // 6. Deploy RoleManager
+  console.log("\n[6/6] Deploying RoleManager...");
+  const RoleManager = await hre.ethers.getContractFactory("RoleManager");
+  const roleManager = await RoleManager.deploy();
+  await roleManager.waitForDeployment();
+  const roleManagerAddress = await roleManager.getAddress();
+  console.log("  RoleManager deployed to:", roleManagerAddress);
+  console.log("  Super Admin:", deployer.address);
 
   // Summary
   console.log("\n" + "=".repeat(60));
@@ -63,6 +72,8 @@ async function main() {
   console.log("  MediAccessControl:     ", accessControlAddress);
   console.log("  PrescriptionManager:   ", prescriptionManagerAddress);
   console.log("  EmergencyAccess:       ", emergencyAccessAddress);
+  console.log("  RoleManager:           ", roleManagerAddress);
+  console.log("  Super Admin:           ", deployer.address);
   console.log("=".repeat(60));
 
   // QR code data for first 3 patient IDs
@@ -81,6 +92,7 @@ async function main() {
       MediAccessControl: accessControlAddress,
       PrescriptionManager: prescriptionManagerAddress,
       EmergencyAccess: emergencyAccessAddress,
+      RoleManager: roleManagerAddress,
     },
   };
 

@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import {
   Users,
   Star,
@@ -12,6 +11,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import useWallet from "@/hooks/useWallet";
+import useRoleGuard from "@/hooks/useRoleGuard";
 
 import PatientsTab from "@/components/doctor/PatientsTab";
 import AccessRequestsTab from "@/components/doctor/AccessRequestsTab";
@@ -37,12 +37,18 @@ const TAB_COMPONENTS = {
 
 export default function DoctorDashboard() {
   const { walletAddress, isConnected, isCorrectNetwork, disconnect, switchToSepolia } = useWallet();
-  const navigate = useNavigate();
+  const { verified, checking } = useRoleGuard("doctor");
   const [activeTab, setActiveTab] = useState("patients");
 
-  useEffect(() => {
-    if (!isConnected) navigate("/");
-  }, [isConnected, navigate]);
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] gap-3 text-[13px] text-[#64748b]">
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0D9488] border-t-transparent" />
+        Verifying doctor credentials on-chain...
+      </div>
+    );
+  }
+  if (!verified) return null;
 
   const ActiveComponent = TAB_COMPONENTS[activeTab];
   const initials = walletAddress ? walletAddress.slice(2, 4).toUpperCase() : "??";

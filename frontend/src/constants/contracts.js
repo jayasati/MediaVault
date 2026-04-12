@@ -3,6 +3,7 @@ import PatientRegistryArtifact from "../../../blockchain/artifacts/contracts/Pat
 import MediAccessControlArtifact from "../../../blockchain/artifacts/contracts/MediAccessControl.sol/MediAccessControl.json";
 import PrescriptionManagerArtifact from "../../../blockchain/artifacts/contracts/PrescriptionManager.sol/PrescriptionManager.json";
 import EmergencyAccessArtifact from "../../../blockchain/artifacts/contracts/EmergencyAccess.sol/EmergencyAccess.json";
+import RoleManagerArtifact from "../../../blockchain/artifacts/contracts/RoleManager.sol/RoleManager.json";
 
 // Addresses — prefer env vars (set after deployment), fall back to empty
 const env = import.meta.env;
@@ -27,6 +28,10 @@ export const CONTRACTS = {
   EmergencyAccess: {
     address: env.VITE_EMERGENCY_ACCESS_ADDRESS || "",
     abi: EmergencyAccessArtifact.abi,
+  },
+  RoleManager: {
+    address: env.VITE_ROLE_MANAGER_ADDRESS || "",
+    abi: RoleManagerArtifact.abi,
   },
 };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   ExternalLink,
   Github,
+  Clock,
 } from "lucide-react";
 
 /* ───────── role config ───────── */
@@ -57,20 +58,6 @@ const ROLES = [
     ],
   },
   {
-    id: "admin",
-    label: "Hospital Admin",
-    icon: Settings,
-    path: "/admin",
-    color: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    iconBg: "bg-amber-500/20",
-    features: [
-      "Register & verify doctors",
-      "Monitor smart contract health",
-      "Audit access logs & compliance",
-      "Manage billing & organ waitlist",
-    ],
-  },
-  {
     id: "researcher",
     label: "Researcher",
     icon: FlaskConical,
@@ -97,83 +84,171 @@ const FEATURES = [
 
 const STEPS = [
   { num: "01", title: "Connect your wallet", desc: "Link your MetaMask wallet to authenticate securely on the blockchain." },
-  { num: "02", title: "Select your role", desc: "Register as a Patient, Doctor, Admin, or Researcher on-chain." },
+  { num: "02", title: "Select your role", desc: "Register as a Patient instantly, or apply as a Doctor or Researcher (admin-approved)." },
   { num: "03", title: "Access dashboard", desc: "Manage records, prescriptions, access control, and more from your personalized dashboard." },
 ];
 
 const STATS = [
-  { icon: Blocks, label: "Smart Contracts", value: "4" },
+  { icon: Blocks, label: "Smart Contracts", value: "6" },
   { icon: ShieldCheck, label: "Sepolia Testnet", value: "Live" },
   { icon: HardDrive, label: "IPFS Storage", value: "Pinata" },
   { icon: Lock, label: "Encryption", value: "AES-256" },
 ];
 
+/* ── Role enum must match Solidity ── */
+const ROLE_ENUM = { NONE: 0, PATIENT: 1, DOCTOR: 2, RESEARCHER: 3, ADMIN: 4, SUPER_ADMIN: 5 };
+const ROLE_PATHS = { 1: "/patient", 2: "/doctor", 3: "/researcher", 4: "/admin", 5: "/super-admin" };
+
 /* ───────── component ───────── */
 export default function Landing() {
   const { walletAddress, isConnected, connect } = useWallet();
   const setRole = useWalletStore((s) => s.setRole);
+  const roleManager = useContract("RoleManager");
   const patientRegistry = useContract("PatientRegistry");
   const navigate = useNavigate();
 
   const [showRoleModal, setShowRoleModal] = useState(false);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [applyRole, setApplyRole] = useState(null); // "doctor" or "researcher"
   const [checking, setChecking] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [pendingApp, setPendingApp] = useState(null); // existing pending application
+  const [diagnostics, setDiagnostics] = useState(null); // on-chain debug info
 
-  // After wallet connects, check registration
-  useEffect(() => {
-    if (!isConnected || !walletAddress || !patientRegistry) return;
+  // Apply form state
+  const [applyName, setApplyName] = useState("");
+  const [applySpec, setApplySpec] = useState("");
+  const [applyCred, setApplyCred] = useState("");
 
-    const checkRegistration = async () => {
-      setChecking(true);
+  // Check on-chain role and pending application — usable as initial check + refresh
+  const checkRole = useCallback(async (silent = false) => {
+    if (!walletAddress || !roleManager) return;
+    if (!silent) setChecking(true);
+    try {
+      const role = Number(await roleManager.getRole(walletAddress));
+
+      // Always read latest application for diagnostics
+      let appInfo = null;
       try {
-        const patient = await patientRegistry.getPatientByWallet(walletAddress);
-        if (patient.walletAddress !== "0x0000000000000000000000000000000000000000" && patient.isActive) {
-          setRole("patient");
-          toast.success("Welcome back! Redirecting to dashboard...");
-          navigate("/patient");
+        const app = await roleManager.getMyApplication(walletAddress);
+        if (Number(app.applicationId) !== 0) {
+          appInfo = {
+            id: Number(app.applicationId),
+            status: Number(app.status), // 0=PENDING, 1=APPROVED, 2=REJECTED
+            requestedRole: Number(app.requestedRole),
+            name: app.name,
+          };
+        }
+      } catch {}
+
+      setDiagnostics({
+        wallet: walletAddress,
+        role,
+        roleName: Object.keys(ROLE_ENUM).find((k) => ROLE_ENUM[k] === role)?.toLowerCase() || "none",
+        application: appInfo,
+      });
+
+      if (role !== ROLE_ENUM.NONE) {
+        // Already registered — redirect to correct dashboard
+        const roleName = Object.keys(ROLE_ENUM).find((k) => ROLE_ENUM[k] === role)?.toLowerCase();
+        setRole(roleName);
+        const path = ROLE_PATHS[role];
+        if (path) {
+          toast.success("Welcome back! Redirecting...", { id: "welcome-back" });
+          navigate(path);
           return;
         }
-        // Not registered — show role selection
-        setShowRoleModal(true);
-      } catch {
-        setShowRoleModal(true);
-      } finally {
-        setChecking(false);
       }
-    };
 
-    checkRegistration();
-  }, [isConnected, walletAddress, patientRegistry, navigate, setRole]);
-
-  const handleRoleSelect = async (role) => {
-    setRole(role.id);
-
-    if (role.id === "patient" && patientRegistry) {
-      setRegistering(true);
-      const tid = toast.loading("Registering on-chain...");
-      try {
-        const tx = await patientRegistry.registerPatient("", "", "", "");
-        toast.loading("Waiting for confirmation...", { id: tid });
-        await tx.wait();
-        toast.success("Registered as Patient!", { id: tid });
-        navigate(role.path);
-      } catch (err) {
-        if (err.code === "ACTION_REJECTED") {
-          toast.error("Transaction rejected", { id: tid });
-        } else {
-          toast.error("Registration failed", { id: tid });
-          console.error(err);
-        }
-      } finally {
-        setRegistering(false);
+      // Pending application notice (only PENDING shows the notice)
+      if (appInfo && appInfo.status === 0) {
+        setPendingApp({
+          id: appInfo.id,
+          role: appInfo.requestedRole === ROLE_ENUM.DOCTOR ? "Doctor" : "Researcher",
+          name: appInfo.name,
+        });
+      } else {
+        setPendingApp(null);
       }
-    } else {
-      // For other roles, just redirect (registration contracts pending)
-      toast.success(`Entering as ${role.label}`);
-      navigate(role.path);
+
+      // Show role selection
+      setShowRoleModal(true);
+    } catch (err) {
+      console.error("checkRole error:", err);
+      setShowRoleModal(true);
+    } finally {
+      if (!silent) setChecking(false);
     }
+  }, [walletAddress, roleManager, navigate, setRole]);
 
+  // Initial check on connect
+  useEffect(() => {
+    if (isConnected && walletAddress && roleManager) {
+      checkRole();
+    }
+  }, [isConnected, walletAddress, roleManager, checkRole]);
+
+  // Handle patient registration (self-serve)
+  const handlePatientRegister = async () => {
+    if (!roleManager || !patientRegistry) return;
+    setRegistering(true);
+    const tid = toast.loading("Registering as Patient...");
+    try {
+      // Register role on RoleManager
+      const tx1 = await roleManager.registerAsPatient();
+      await tx1.wait();
+      // Register on PatientRegistry
+      const tx2 = await patientRegistry.registerPatient("", "", "", "");
+      await tx2.wait();
+      setRole("patient");
+      toast.success("Registered as Patient!", { id: tid });
+      setShowRoleModal(false);
+      navigate("/patient");
+    } catch (err) {
+      if (err.code === "ACTION_REJECTED") {
+        toast.error("Transaction rejected", { id: tid });
+      } else {
+        toast.error(err.reason || "Registration failed", { id: tid });
+      }
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  // Handle doctor/researcher application
+  const handleApply = async () => {
+    if (!roleManager || !applyName || !applyCred) {
+      toast.error("Fill all required fields");
+      return;
+    }
+    setRegistering(true);
+    const tid = toast.loading("Submitting application...");
+    try {
+      const roleEnum = applyRole === "doctor" ? ROLE_ENUM.DOCTOR : ROLE_ENUM.RESEARCHER;
+      const tx = await roleManager.applyForRole(roleEnum, applyName, applySpec, applyCred);
+      await tx.wait();
+      toast.success("Application submitted! An admin will review it.", { id: tid });
+      setPendingApp({ role: applyRole === "doctor" ? "Doctor" : "Researcher", name: applyName });
+      setShowApplyModal(false);
+      setShowRoleModal(true);
+      setApplyName("");
+      setApplySpec("");
+      setApplyCred("");
+    } catch (err) {
+      if (err.code === "ACTION_REJECTED") {
+        toast.error("Transaction rejected", { id: tid });
+      } else {
+        toast.error(err.reason || "Application failed", { id: tid });
+      }
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const openApplyModal = (roleType) => {
+    setApplyRole(roleType);
     setShowRoleModal(false);
+    setShowApplyModal(true);
   };
 
   return (
@@ -346,11 +421,11 @@ export default function Landing() {
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-teal-400">Get Started</p>
           <h2 className="text-3xl font-bold">Choose your role</h2>
           <p className="mt-3 text-sm text-slate-400">
-            MediVault serves patients, doctors, admins, and researchers. Select yours to begin.
+            MediVault serves patients, doctors, and researchers. Select yours to begin.
           </p>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {ROLES.map((role) => {
             const Icon = role.icon;
             return (
@@ -359,8 +434,10 @@ export default function Landing() {
                 onClick={() => {
                   if (!isConnected) {
                     connect();
+                  } else if (role.id === "patient") {
+                    handlePatientRegister();
                   } else {
-                    handleRoleSelect(role);
+                    openApplyModal(role.id);
                   }
                 }}
                 disabled={registering}
@@ -440,39 +517,148 @@ export default function Landing() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#151a20] p-8">
             <div className="mb-6 text-center">
-              <h2 className="text-xl font-bold">Select your role</h2>
+              <h2 className="text-xl font-bold">Get started with MediVault</h2>
               <p className="mt-1 text-sm text-slate-400">
-                This will register you on-chain. Choose carefully — you can have one role per wallet.
+                Register as a patient instantly, or apply for doctor/researcher (requires admin approval).
               </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              {ROLES.map((role) => {
-                const Icon = role.icon;
-                return (
+            {/* On-chain diagnostics panel */}
+            {diagnostics && (
+              <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-medium text-slate-300">On-chain status</div>
                   <button
-                    key={role.id}
-                    onClick={() => handleRoleSelect(role)}
-                    disabled={registering}
-                    className={`flex flex-col rounded-xl border p-5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed ${role.color}`}
+                    onClick={() => checkRole()}
+                    disabled={checking}
+                    className="text-[10px] text-teal-400 hover:text-teal-300 disabled:opacity-50"
                   >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${role.iconBg}`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <span className="text-sm font-semibold text-white">{role.label}</span>
-                    </div>
-                    <ul className="space-y-1">
-                      {role.features.slice(0, 3).map((f) => (
-                        <li key={f} className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
+                    {checking ? "Refreshing..." : "Refresh ↻"}
                   </button>
-                );
-              })}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                  <div>
+                    <span className="text-slate-500">Wallet:</span>{" "}
+                    <span className="text-slate-300">{diagnostics.wallet.slice(0, 8)}…{diagnostics.wallet.slice(-6)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Role:</span>{" "}
+                    <span className={diagnostics.role === 0 ? "text-slate-400" : "text-teal-400"}>
+                      {diagnostics.roleName.toUpperCase()} ({diagnostics.role})
+                    </span>
+                  </div>
+                  {diagnostics.application && (
+                    <>
+                      <div>
+                        <span className="text-slate-500">App ID:</span>{" "}
+                        <span className="text-slate-300">#{diagnostics.application.id}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">App status:</span>{" "}
+                        <span className={
+                          diagnostics.application.status === 0 ? "text-amber-400"
+                          : diagnostics.application.status === 1 ? "text-teal-400"
+                          : "text-red-400"
+                        }>
+                          {["PENDING", "APPROVED", "REJECTED"][diagnostics.application.status]}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Pending application notice */}
+            {pendingApp && (
+              <div className="mb-4 flex items-center gap-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+                <Clock className="h-4 w-4 text-amber-400 flex-shrink-0" />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-amber-300">Application pending</div>
+                  <div className="text-xs text-amber-400/70">
+                    Your {pendingApp.role} application (ID #{pendingApp.id}) is awaiting admin approval.
+                    Share this ID with the admin who needs to approve it.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Patient — instant registration */}
+              <button
+                onClick={handlePatientRegister}
+                disabled={registering || !!pendingApp}
+                className="flex flex-col rounded-xl border p-5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed bg-teal-500/10 text-teal-400 border-teal-500/20"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/20">
+                    <Shield className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-white">Patient</span>
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300">Instant</span>
+                  </div>
+                </div>
+                <ul className="space-y-1">
+                  {ROLES[0].features.slice(0, 3).map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-[11px] text-slate-400">
+                      <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </button>
+
+              {/* Doctor — apply */}
+              <button
+                onClick={() => openApplyModal("doctor")}
+                disabled={registering || !!pendingApp}
+                className="flex flex-col rounded-xl border p-5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500/10 text-blue-400 border-blue-500/20"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/20">
+                    <Stethoscope className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-white">Doctor</span>
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Requires approval</span>
+                  </div>
+                </div>
+                <ul className="space-y-1">
+                  {ROLES[1].features.slice(0, 3).map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-[11px] text-slate-400">
+                      <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </button>
+
+              {/* Researcher — apply */}
+              <button
+                onClick={() => openApplyModal("researcher")}
+                disabled={registering || !!pendingApp}
+                className="flex flex-col rounded-xl border p-5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed bg-purple-500/10 text-purple-400 border-purple-500/20"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/20">
+                    <FlaskConical className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-white">Researcher</span>
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Requires approval</span>
+                  </div>
+                </div>
+                <ul className="space-y-1">
+                  {ROLES[2].features.slice(0, 3).map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-[11px] text-slate-400">
+                      <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </button>
+
             </div>
 
             <button
@@ -481,6 +667,85 @@ export default function Landing() {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Apply Modal (Doctor / Researcher) ── */}
+      {showApplyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151a20] p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold">
+                Apply as {applyRole === "doctor" ? "Doctor" : "Researcher"}
+              </h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Your application will be reviewed by a MediVault admin. This is recorded on-chain.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Full name *</label>
+                <input
+                  type="text"
+                  value={applyName}
+                  onChange={(e) => setApplyName(e.target.value)}
+                  placeholder="Dr. Jane Smith"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              {applyRole === "doctor" && (
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Specialization</label>
+                  <select
+                    value={applySpec}
+                    onChange={(e) => setApplySpec(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="">Select specialization</option>
+                    <option>Cardiology</option>
+                    <option>Oncology</option>
+                    <option>Neurology</option>
+                    <option>General Medicine</option>
+                    <option>Dermatology</option>
+                    <option>Orthopedics</option>
+                    <option>Endocrinology</option>
+                    <option>Pediatrics</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">
+                  {applyRole === "doctor" ? "License number *" : "Institution / Credentials *"}
+                </label>
+                <input
+                  type="text"
+                  value={applyCred}
+                  onChange={(e) => setApplyCred(e.target.value)}
+                  placeholder={applyRole === "doctor" ? "MCI-12345" : "PhD, MIT Research Lab"}
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowApplyModal(false); setShowRoleModal(true); }}
+                className="flex-1 rounded-lg border border-white/10 py-2.5 text-sm text-slate-400 hover:bg-white/5 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleApply}
+                disabled={registering || !applyName || !applyCred}
+                className="flex-1 rounded-lg bg-teal-500 py-2.5 text-sm font-medium text-white hover:bg-teal-600 transition-colors disabled:opacity-50"
+              >
+                {registering ? "Submitting..." : "Submit Application"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -139,6 +139,8 @@ const useWalletStore = create(
           if (accs.length === 0) {
             get().disconnect();
           } else {
+            // Clear stale role from previous wallet — new wallet must re-verify on-chain
+            set({ role: null });
             browserProvider.getSigner().then((s) => {
               get().setWallet({ address: accs[0], chainId: get().chainId, provider: browserProvider, signer: s });
             });
