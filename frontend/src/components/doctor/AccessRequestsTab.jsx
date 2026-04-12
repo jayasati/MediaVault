@@ -3,6 +3,7 @@ import { Send, Clock, ExternalLink } from "lucide-react";
 import toast from "react-hot-toast";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import UserName from "@/components/UserName";
 import { ethers } from "ethers";
 
 function shortenAddr(a) {
@@ -163,7 +164,7 @@ export default function AccessRequestsTab() {
                 <Clock className="h-3.5 w-3.5 text-[#633806]" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium">{shortenAddr(r.patientAddress)}</div>
+                <div className="text-xs font-medium"><UserName address={r.patientAddress} /></div>
                 <div className="text-[11px] text-[#64748b]">
                   {new Date(Number(r.requestedAt) * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                   {" · "}{r.reason || "No reason"}
@@ -194,7 +195,7 @@ export default function AccessRequestsTab() {
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{shortenAddr(r.patientAddress)}</div>
+                  <div className="text-xs font-medium"><UserName address={r.patientAddress} /></div>
                   <div className="text-[11px] text-[#64748b]">
                     Expires {new Date(Number(r.expiresAt) * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                   </div>

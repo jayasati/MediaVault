@@ -3,6 +3,7 @@ import { Pill, AlertTriangle, ExternalLink, CheckCircle, Clock } from "lucide-re
 import toast from "react-hot-toast";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import UserName from "@/components/UserName";
 
 function shortenAddr(addr) {
   return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "";
@@ -117,7 +118,7 @@ export default function PrescriptionsTab() {
                   )}
                 </div>
                 <div className="text-[11px] text-[#64748b]">
-                  Dr. {shortenAddr(rx.doctorAddress)} · Expires{" "}
+                  Dr. <UserName address={rx.doctorAddress} showAddress={false} /> · Expires{" "}
                   {new Date(Number(rx.expiresAt) * 1000).toLocaleDateString("en-IN", {
                     day: "numeric",
                     month: "short",

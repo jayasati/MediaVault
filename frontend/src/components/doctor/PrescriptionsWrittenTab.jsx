@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { AlertTriangle, CheckCircle, Clock, ExternalLink } from "lucide-react";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import UserName from "@/components/UserName";
 
 function shortenAddr(a) {
   return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "";
@@ -108,7 +109,7 @@ export default function PrescriptionsWrittenTab() {
             >
               <div>
                 <div className="text-xs font-medium flex items-center gap-1.5">
-                  {shortenAddr(rx.patientAddress)} — {rx.medicineName}
+                  <UserName address={rx.patientAddress} showAddress={false} /> — {rx.medicineName}
                   {rx.isControlled && (
                     <span className="text-[9px] px-1.5 py-[1px] rounded bg-[#FCEBEB] text-[#791F1F] font-medium">
                       CS

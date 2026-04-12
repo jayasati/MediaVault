@@ -3,6 +3,7 @@ import { Search, Plus, FileText, Pill, ExternalLink, AlertTriangle } from "lucid
 import toast from "react-hot-toast";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import UserName from "@/components/UserName";
 import { ethers } from "ethers";
 
 function shortenAddr(a) {
@@ -224,7 +225,7 @@ export default function PatientsTab() {
                     {initials}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{shortenAddr(p.patientAddress)}</div>
+                    <div className="text-xs font-medium truncate"><UserName address={p.patientAddress} showAddress={false} /></div>
                     <div className="text-[10px] text-[#94a3b8]">{daysLeft(p.expiresAt)}</div>
                   </div>
                 </button>
@@ -248,7 +249,7 @@ export default function PatientsTab() {
                   {selected.patientAddress.slice(2, 4).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-medium">Patient {shortenAddr(selected.patientAddress)}</div>
+                  <div className="text-[13px] font-medium"><UserName address={selected.patientAddress} showAddress={false} /></div>
                   <div className="text-[10px] text-[#64748b] font-mono">{selected.patientAddress}</div>
                 </div>
                 {selectedProfile && (

@@ -17,14 +17,25 @@ export default function DoctorsTab() {
 
   const [pendingApps, setPendingApps] = useState([]);
   const [approvedList, setApprovedList] = useState([]);
+  const [adminHospital, setAdminHospital] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const loadApplications = useCallback(async () => {
-    if (!roleManager) return;
+    if (!roleManager || !walletAddress) return;
     setLoading(true);
     try {
-      // Get pending applications
-      const pendingIds = await roleManager.getPendingApplications();
+      // Look up the current admin's hospitalId
+      const me = await roleManager.getUserDetails(walletAddress);
+      const myHospital = me.hospitalId;
+      const isSuperAdmin = Number(me.role) === 5;
+      setAdminHospital(myHospital);
+
+      // Fetch pending applications scoped to this hospital
+      // (super admins see everything via getPendingApplications)
+      const pendingIds = isSuperAdmin
+        ? await roleManager.getPendingApplications()
+        : await roleManager.getPendingApplicationsForHospital(myHospital);
+
       const pending = [];
       for (const id of pendingIds) {
         const app = await roleManager.getApplication(id);
@@ -35,32 +46,34 @@ export default function DoctorsTab() {
           name: app.name,
           specialization: app.specialization,
           credentials: app.credentials,
+          hospitalId: app.hospitalId,
           appliedAt: Number(app.appliedAt),
         });
       }
       setPendingApps(pending);
 
-      // Get approved doctors/researchers from events
-      // Dedupe by wallet — only show each wallet ONCE with their LATEST approval
+      // Approved doctors/researchers — filter by same hospital (unless super admin)
       const filter = roleManager.filters.ApplicationApproved();
       const events = await roleManager.queryFilter(filter, 0, "latest");
 
       const byWallet = new Map();
       for (const evt of events) {
         const app = await roleManager.getApplication(evt.args[0]);
-        // Keep only the latest event per wallet (events are returned in block order)
         byWallet.set(app.applicant.toLowerCase(), {
           address: app.applicant,
           name: app.name,
           role: Number(app.requestedRole),
           specialization: app.specialization,
+          hospitalId: app.hospitalId,
           txHash: evt.transactionHash,
         });
       }
 
       // Filter: only keep wallets whose current on-chain role is still DOCTOR or RESEARCHER
+      // AND belong to this admin's hospital (unless super admin)
       const approved = [];
       for (const entry of byWallet.values()) {
+        if (!isSuperAdmin && entry.hospitalId !== myHospital) continue;
         const details = await roleManager.getUserDetails(entry.address);
         const currentRole = Number(details.role);
         if (currentRole === 2 || currentRole === 3) {
@@ -133,6 +146,21 @@ export default function DoctorsTab() {
 
   return (
     <div>
+      {/* Hospital scope banner */}
+      {adminHospital && (
+        <div className="flex items-center gap-2 p-[10px] px-[14px] bg-[#E6F1FB] border border-[#93c5fd] rounded-[9px] mb-4">
+          <div className="text-[11px] text-[#0C447C]">
+            <span className="font-medium">Hospital scope:</span>{" "}
+            <span className="font-mono">{adminHospital === "0x0000000000000000000000000000000000000000000000000000000000000000"
+              ? "all hospitals (super admin)"
+              : `${adminHospital.slice(0, 10)}…`}</span>
+            <span className="ml-2 text-[#64748b]">
+              — you only see applications targeting your hospital
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Pending applications */}
       <div className="bg-white border border-[#e2e8f0] rounded-xl p-5 mb-4">
         <div className="text-xs font-medium text-[#64748b] mb-3">

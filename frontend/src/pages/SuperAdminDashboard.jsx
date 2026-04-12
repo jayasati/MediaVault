@@ -16,6 +16,7 @@ export default function SuperAdminDashboard() {
   const roleManager = useContract("RoleManager");
 
   const [addAddr, setAddAddr] = useState("");
+  const [addHospital, setAddHospital] = useState("");
   const [adding, setAdding] = useState(false);
   const [admins, setAdmins] = useState([]);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
@@ -40,6 +41,7 @@ export default function SuperAdminDashboard() {
           if (Number(details.role) === 4) {
             adminList.push({
               address: addr,
+              hospitalId: details.hospitalId,
               registeredAt: Number(details.registeredAt),
               txHash: evt.transactionHash,
             });
@@ -59,7 +61,10 @@ export default function SuperAdminDashboard() {
   }, [verified, loadAdmins]);
 
   const handleAddAdmin = async () => {
-    if (!roleManager || !addAddr) return;
+    if (!roleManager || !addAddr || !addHospital) {
+      toast.error("Fill wallet address and hospital");
+      return;
+    }
     if (!ethers.isAddress(addAddr)) {
       toast.error("Invalid wallet address");
       return;
@@ -67,10 +72,13 @@ export default function SuperAdminDashboard() {
     setAdding(true);
     const tid = toast.loading("Adding hospital admin on-chain...");
     try {
-      const tx = await roleManager.addAdmin(addAddr);
+      // Hash hospital name to bytes32 — same format doctors use when applying
+      const hospitalId = ethers.keccak256(ethers.toUtf8Bytes(addHospital.trim().toLowerCase()));
+      const tx = await roleManager.addAdmin(addAddr, hospitalId);
       await tx.wait();
-      toast.success(`${shortenAddr(addAddr)} is now a Hospital Admin`, { id: tid });
+      toast.success(`${shortenAddr(addAddr)} is now admin for ${addHospital}`, { id: tid });
       setAddAddr("");
+      setAddHospital("");
       loadAdmins();
     } catch (err) {
       toast.error(err.reason || "Failed to add admin", { id: tid });
@@ -189,9 +197,19 @@ export default function SuperAdminDashboard() {
                   placeholder="Wallet address (0x…)"
                   className="px-[10px] py-[7px] text-xs border border-[#cbd5e1] rounded-[7px] focus:outline-none focus:border-[#0D9488]"
                 />
+                <input
+                  type="text"
+                  value={addHospital}
+                  onChange={(e) => setAddHospital(e.target.value)}
+                  placeholder="Hospital identifier (e.g. apollo-bangalore)"
+                  className="px-[10px] py-[7px] text-xs border border-[#cbd5e1] rounded-[7px] focus:outline-none focus:border-[#0D9488]"
+                />
+                <div className="text-[10px] text-[#94a3b8]">
+                  Doctors applying to this hospital must use the same identifier. Case-insensitive.
+                </div>
                 <button
                   onClick={handleAddAdmin}
-                  disabled={adding || !addAddr}
+                  disabled={adding || !addAddr || !addHospital}
                   className="px-4 py-[7px] bg-[#0D9488] text-white text-xs font-medium rounded-[7px] hover:bg-[#0B7C72] disabled:opacity-50"
                 >
                   {adding ? "Adding..." : "Add Admin"}
@@ -226,6 +244,9 @@ export default function SuperAdminDashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-mono font-medium">{shortenAddr(admin.address)}</div>
+                      <div className="text-[10px] text-[#64748b]">
+                        Hospital: <span className="font-mono">{admin.hospitalId.slice(0, 10)}…</span>
+                      </div>
                       <div className="text-[10px] text-[#64748b]">
                         Added {new Date(admin.registeredAt * 1000).toLocaleDateString("en-IN", {
                           day: "numeric", month: "short", year: "numeric",

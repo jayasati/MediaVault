@@ -3,6 +3,7 @@ import { UserPlus, ShieldCheck, Clock, ExternalLink } from "lucide-react";
 import toast from "react-hot-toast";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import UserName from "@/components/UserName";
 
 const STATUS_STYLES = {
   0: { label: "Pending", bg: "bg-[#FAEEDA]", text: "text-[#633806]" },
@@ -160,7 +161,7 @@ export default function AccessTab() {
                 <UserPlus className="h-3.5 w-3.5" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium">{shortenAddr(req.doctorAddress)}</div>
+                <div className="text-xs font-medium"><UserName address={req.doctorAddress} /></div>
                 <div className="text-[11px] text-[#64748b]">Reason: {req.reason || "Not specified"}</div>
               </div>
               <button
@@ -198,7 +199,7 @@ export default function AccessTab() {
                 <ShieldCheck className="h-3.5 w-3.5" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium">{shortenAddr(req.doctorAddress)}</div>
+                <div className="text-xs font-medium"><UserName address={req.doctorAddress} /></div>
                 <div className="text-[11px] text-[#64748b]">
                   Expires{" "}
                   {new Date(req.expiresAt * 1000).toLocaleDateString("en-IN", {
@@ -240,7 +241,7 @@ export default function AccessTab() {
                   <Clock className="h-3.5 w-3.5 text-[#64748b]" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{shortenAddr(req.doctorAddress)}</div>
+                  <div className="text-xs font-medium"><UserName address={req.doctorAddress} /></div>
                   <div className="text-[11px] text-[#64748b]">
                     {req.blockTimestamp
                       ? new Date(req.blockTimestamp * 1000).toLocaleDateString("en-IN", {

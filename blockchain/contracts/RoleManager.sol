@@ -8,16 +8,22 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * @notice On-chain role-based access control for MediVault.
  *
  * ROLE HIERARCHY:
- *   SUPER_ADMIN (deployer) → can add ADMINs
- *   ADMIN → can approve DOCTORs and RESEARCHERs
- *   DOCTOR / RESEARCHER → must apply and be approved by an ADMIN
- *   PATIENT → self-registration (anyone)
+ *   SUPER_ADMIN (deployer)        - global, hospitalId = 0
+ *   ADMIN (hospital head)         - tied to one hospital, can approve doctors/researchers in same hospital
+ *   DOCTOR / RESEARCHER           - apply to a specific hospital, approved by that hospital's admin
+ *   PATIENT                       - self-registration, no hospital
  *
- * Applications are stored on-chain. Only admins can approve/reject.
+ * SECURITY FEATURES:
+ *   1. Application cooldown — rejected applicants must wait APPLICATION_COOLDOWN before re-applying
+ *   2. Application expiry  — pending applications auto-expire after APPLICATION_TTL
+ *   3. Hospital scoping    — admins can only approve applications targeting their own hospital
  */
 contract RoleManager is ReentrancyGuard {
     enum Role { NONE, PATIENT, DOCTOR, RESEARCHER, ADMIN, SUPER_ADMIN }
     enum ApplicationStatus { PENDING, APPROVED, REJECTED }
+
+    uint256 public constant APPLICATION_COOLDOWN = 7 days;
+    uint256 public constant APPLICATION_TTL = 14 days;
 
     struct UserRole {
         address wallet;
@@ -25,15 +31,17 @@ contract RoleManager is ReentrancyGuard {
         bool isActive;
         uint256 registeredAt;
         address approvedBy;
+        bytes32 hospitalId; // 0 for super admin / patients
     }
 
     struct Application {
         uint256 applicationId;
         address applicant;
         Role requestedRole;
+        bytes32 hospitalId;
         string name;
-        string specialization;  // for doctors
-        string credentials;     // license number, institution, etc.
+        string specialization;
+        string credentials;
         ApplicationStatus status;
         uint256 appliedAt;
         uint256 respondedAt;
@@ -45,13 +53,13 @@ contract RoleManager is ReentrancyGuard {
 
     mapping(address => UserRole) private users;
     mapping(uint256 => Application) private applications;
-    mapping(address => uint256) private latestApplication; // wallet → applicationId
+    mapping(address => uint256) private latestApplication;
     uint256[] private allApplicationIds;
 
     event PatientRegistered(address indexed wallet);
-    event AdminAdded(address indexed wallet, address indexed addedBy);
+    event AdminAdded(address indexed wallet, bytes32 indexed hospitalId, address indexed addedBy);
     event AdminRemoved(address indexed wallet, address indexed removedBy);
-    event ApplicationSubmitted(uint256 indexed applicationId, address indexed applicant, Role requestedRole);
+    event ApplicationSubmitted(uint256 indexed applicationId, address indexed applicant, Role requestedRole, bytes32 hospitalId);
     event ApplicationApproved(uint256 indexed applicationId, address indexed applicant, Role role, address indexed approvedBy);
     event ApplicationRejected(uint256 indexed applicationId, address indexed applicant, address indexed rejectedBy);
     event RoleRevoked(address indexed wallet, Role previousRole, address indexed revokedBy);
@@ -76,7 +84,8 @@ contract RoleManager is ReentrancyGuard {
             role: Role.SUPER_ADMIN,
             isActive: true,
             registeredAt: block.timestamp,
-            approvedBy: msg.sender
+            approvedBy: msg.sender,
+            hospitalId: bytes32(0)
         });
     }
 
@@ -89,30 +98,37 @@ contract RoleManager is ReentrancyGuard {
             role: Role.PATIENT,
             isActive: true,
             registeredAt: block.timestamp,
-            approvedBy: address(0)
+            approvedBy: address(0),
+            hospitalId: bytes32(0)
         });
         emit PatientRegistered(msg.sender);
     }
 
     // ── Super admin: manage admins ──
 
-    function addAdmin(address wallet) external onlySuperAdmin {
+    function addAdmin(address wallet, bytes32 hospitalId) external onlySuperAdmin {
         require(wallet != address(0), "Invalid address");
-        require(users[wallet].role == Role.NONE || users[wallet].role == Role.PATIENT, "Already has a role");
+        require(hospitalId != bytes32(0), "Hospital ID required");
+        require(
+            users[wallet].role == Role.NONE || users[wallet].role == Role.PATIENT,
+            "Already has a role"
+        );
         users[wallet] = UserRole({
             wallet: wallet,
             role: Role.ADMIN,
             isActive: true,
             registeredAt: block.timestamp,
-            approvedBy: msg.sender
+            approvedBy: msg.sender,
+            hospitalId: hospitalId
         });
-        emit AdminAdded(wallet, msg.sender);
+        emit AdminAdded(wallet, hospitalId, msg.sender);
     }
 
     function removeAdmin(address wallet) external onlySuperAdmin {
         require(users[wallet].role == Role.ADMIN, "Not an admin");
         users[wallet].role = Role.NONE;
         users[wallet].isActive = false;
+        users[wallet].hospitalId = bytes32(0);
         emit AdminRemoved(wallet, msg.sender);
     }
 
@@ -120,6 +136,7 @@ contract RoleManager is ReentrancyGuard {
 
     function applyForRole(
         Role requestedRole,
+        bytes32 hospitalId,
         string calldata name,
         string calldata specialization,
         string calldata credentials
@@ -128,6 +145,7 @@ contract RoleManager is ReentrancyGuard {
             requestedRole == Role.DOCTOR || requestedRole == Role.RESEARCHER,
             "Can only apply for Doctor or Researcher"
         );
+        require(hospitalId != bytes32(0), "Hospital ID required");
         require(
             users[msg.sender].role == Role.NONE || users[msg.sender].role == Role.PATIENT,
             "Already has a privileged role"
@@ -135,13 +153,25 @@ contract RoleManager is ReentrancyGuard {
         require(bytes(name).length > 0, "Name required");
         require(bytes(credentials).length > 0, "Credentials required");
 
-        // Check no pending application exists
+        // Cooldown check on prior application
         uint256 existingId = latestApplication[msg.sender];
         if (existingId != 0) {
-            require(
-                applications[existingId].status != ApplicationStatus.PENDING,
-                "Pending application already exists"
-            );
+            Application storage prev = applications[existingId];
+
+            // No new app while one is still pending and not expired
+            if (prev.status == ApplicationStatus.PENDING) {
+                require(
+                    block.timestamp > prev.appliedAt + APPLICATION_TTL,
+                    "Pending application already exists"
+                );
+                // expired pending — implicitly allow re-application
+            } else if (prev.status == ApplicationStatus.REJECTED) {
+                require(
+                    block.timestamp >= prev.respondedAt + APPLICATION_COOLDOWN,
+                    "Cooldown active - try again later"
+                );
+            }
+            // APPROVED case is already blocked by the role check above
         }
 
         _applicationIdCounter++;
@@ -151,6 +181,7 @@ contract RoleManager is ReentrancyGuard {
             applicationId: newId,
             applicant: msg.sender,
             requestedRole: requestedRole,
+            hospitalId: hospitalId,
             name: name,
             specialization: specialization,
             credentials: credentials,
@@ -163,13 +194,27 @@ contract RoleManager is ReentrancyGuard {
         latestApplication[msg.sender] = newId;
         allApplicationIds.push(newId);
 
-        emit ApplicationSubmitted(newId, msg.sender, requestedRole);
+        emit ApplicationSubmitted(newId, msg.sender, requestedRole, hospitalId);
     }
 
     function approveApplication(uint256 applicationId) external onlyAdmin {
         Application storage app = applications[applicationId];
         require(app.applicationId != 0, "Application does not exist");
         require(app.status == ApplicationStatus.PENDING, "Not pending");
+
+        // Expiry check — admins cannot approve stale applications
+        require(
+            block.timestamp <= app.appliedAt + APPLICATION_TTL,
+            "Application expired"
+        );
+
+        // Hospital scoping — non-super admins can only approve their own hospital's applications
+        if (msg.sender != superAdmin) {
+            require(
+                users[msg.sender].hospitalId == app.hospitalId,
+                "Different hospital - cannot approve"
+            );
+        }
 
         app.status = ApplicationStatus.APPROVED;
         app.respondedAt = block.timestamp;
@@ -180,7 +225,8 @@ contract RoleManager is ReentrancyGuard {
             role: app.requestedRole,
             isActive: true,
             registeredAt: block.timestamp,
-            approvedBy: msg.sender
+            approvedBy: msg.sender,
+            hospitalId: app.hospitalId
         });
 
         emit ApplicationApproved(applicationId, app.applicant, app.requestedRole, msg.sender);
@@ -191,6 +237,14 @@ contract RoleManager is ReentrancyGuard {
         require(app.applicationId != 0, "Application does not exist");
         require(app.status == ApplicationStatus.PENDING, "Not pending");
 
+        // Hospital scoping
+        if (msg.sender != superAdmin) {
+            require(
+                users[msg.sender].hospitalId == app.hospitalId,
+                "Different hospital - cannot reject"
+            );
+        }
+
         app.status = ApplicationStatus.REJECTED;
         app.respondedAt = block.timestamp;
         app.respondedBy = msg.sender;
@@ -198,18 +252,28 @@ contract RoleManager is ReentrancyGuard {
         emit ApplicationRejected(applicationId, app.applicant, msg.sender);
     }
 
-    // ── Revoke any role (admin+ only) ──
+    // ── Revoke role ──
 
     function revokeRole(address wallet) external onlyAdmin {
         require(wallet != superAdmin, "Cannot revoke super admin");
         Role prev = users[wallet].role;
         require(prev != Role.NONE, "No role to revoke");
-        // Admins cannot revoke other admins — only super admin can
+
         if (prev == Role.ADMIN) {
             require(msg.sender == superAdmin, "Only super admin can revoke admins");
+        } else if (prev == Role.DOCTOR || prev == Role.RESEARCHER) {
+            // Hospital scoping for revocation
+            if (msg.sender != superAdmin) {
+                require(
+                    users[msg.sender].hospitalId == users[wallet].hospitalId,
+                    "Different hospital - cannot revoke"
+                );
+            }
         }
+
         users[wallet].role = Role.NONE;
         users[wallet].isActive = false;
+        users[wallet].hospitalId = bytes32(0);
         emit RoleRevoked(wallet, prev, msg.sender);
     }
 
@@ -232,15 +296,55 @@ contract RoleManager is ReentrancyGuard {
         return applications[id];
     }
 
+    function isApplicationExpired(uint256 applicationId) external view returns (bool) {
+        Application storage app = applications[applicationId];
+        if (app.applicationId == 0 || app.status != ApplicationStatus.PENDING) return false;
+        return block.timestamp > app.appliedAt + APPLICATION_TTL;
+    }
+
+    /// @notice Pending applications, optionally filtered by hospital. Pass bytes32(0) for all.
     function getPendingApplications() external view returns (uint256[] memory) {
         uint256 count = 0;
         for (uint256 i = 0; i < allApplicationIds.length; i++) {
-            if (applications[allApplicationIds[i]].status == ApplicationStatus.PENDING) count++;
+            Application storage app = applications[allApplicationIds[i]];
+            if (app.status == ApplicationStatus.PENDING && block.timestamp <= app.appliedAt + APPLICATION_TTL) {
+                count++;
+            }
         }
         uint256[] memory result = new uint256[](count);
         uint256 idx = 0;
         for (uint256 i = 0; i < allApplicationIds.length; i++) {
-            if (applications[allApplicationIds[i]].status == ApplicationStatus.PENDING) {
+            Application storage app = applications[allApplicationIds[i]];
+            if (app.status == ApplicationStatus.PENDING && block.timestamp <= app.appliedAt + APPLICATION_TTL) {
+                result[idx] = allApplicationIds[i];
+                idx++;
+            }
+        }
+        return result;
+    }
+
+    /// @notice Pending applications for a specific hospital (excluding expired)
+    function getPendingApplicationsForHospital(bytes32 hospitalId) external view returns (uint256[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < allApplicationIds.length; i++) {
+            Application storage app = applications[allApplicationIds[i]];
+            if (
+                app.status == ApplicationStatus.PENDING
+                && app.hospitalId == hospitalId
+                && block.timestamp <= app.appliedAt + APPLICATION_TTL
+            ) {
+                count++;
+            }
+        }
+        uint256[] memory result = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < allApplicationIds.length; i++) {
+            Application storage app = applications[allApplicationIds[i]];
+            if (
+                app.status == ApplicationStatus.PENDING
+                && app.hospitalId == hospitalId
+                && block.timestamp <= app.appliedAt + APPLICATION_TTL
+            ) {
                 result[idx] = allApplicationIds[i];
                 idx++;
             }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ethers } from "ethers";
 import { useNavigate } from "react-router-dom";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
@@ -119,6 +120,11 @@ export default function Landing() {
   const [applyName, setApplyName] = useState("");
   const [applySpec, setApplySpec] = useState("");
   const [applyCred, setApplyCred] = useState("");
+  const [applyHospital, setApplyHospital] = useState("");
+
+  // Patient registration modal
+  const [showPatientModal, setShowPatientModal] = useState(false);
+  const [patientName, setPatientName] = useState("");
 
   // Check on-chain role and pending application — usable as initial check + refresh
   const checkRole = useCallback(async (silent = false) => {
@@ -188,21 +194,32 @@ export default function Landing() {
     }
   }, [isConnected, walletAddress, roleManager, checkRole]);
 
+  // Open the patient name entry modal
+  const openPatientModal = () => {
+    setShowRoleModal(false);
+    setShowPatientModal(true);
+  };
+
   // Handle patient registration (self-serve)
   const handlePatientRegister = async () => {
     if (!roleManager || !patientRegistry) return;
+    if (!patientName.trim()) {
+      toast.error("Please enter your name");
+      return;
+    }
     setRegistering(true);
     const tid = toast.loading("Registering as Patient...");
     try {
       // Register role on RoleManager
       const tx1 = await roleManager.registerAsPatient();
       await tx1.wait();
-      // Register on PatientRegistry
-      const tx2 = await patientRegistry.registerPatient("", "", "", "");
+      // Register on PatientRegistry with the provided name
+      const tx2 = await patientRegistry.registerPatient(patientName.trim(), "", "", "");
       await tx2.wait();
       setRole("patient");
       toast.success("Registered as Patient!", { id: tid });
-      setShowRoleModal(false);
+      setShowPatientModal(false);
+      setPatientName("");
       navigate("/patient");
     } catch (err) {
       if (err.code === "ACTION_REJECTED") {
@@ -217,23 +234,27 @@ export default function Landing() {
 
   // Handle doctor/researcher application
   const handleApply = async () => {
-    if (!roleManager || !applyName || !applyCred) {
-      toast.error("Fill all required fields");
+    if (!roleManager || !applyName || !applyCred || !applyHospital) {
+      toast.error("Fill all required fields including hospital");
       return;
     }
     setRegistering(true);
     const tid = toast.loading("Submitting application...");
     try {
       const roleEnum = applyRole === "doctor" ? ROLE_ENUM.DOCTOR : ROLE_ENUM.RESEARCHER;
-      const tx = await roleManager.applyForRole(roleEnum, applyName, applySpec, applyCred);
+      // Hash hospital name to bytes32 — must match what super admin used when adding admin
+      const hospitalId = ethers.keccak256(ethers.toUtf8Bytes(applyHospital.trim().toLowerCase()));
+      const tx = await roleManager.applyForRole(roleEnum, hospitalId, applyName, applySpec, applyCred);
       await tx.wait();
-      toast.success("Application submitted! An admin will review it.", { id: tid });
-      setPendingApp({ role: applyRole === "doctor" ? "Doctor" : "Researcher", name: applyName });
+      toast.success("Application submitted! Admin from " + applyHospital + " will review it.", { id: tid });
       setShowApplyModal(false);
       setShowRoleModal(true);
       setApplyName("");
       setApplySpec("");
       setApplyCred("");
+      setApplyHospital("");
+      // Refresh diagnostics so the user sees their new pending app
+      checkRole();
     } catch (err) {
       if (err.code === "ACTION_REJECTED") {
         toast.error("Transaction rejected", { id: tid });
@@ -435,7 +456,7 @@ export default function Landing() {
                   if (!isConnected) {
                     connect();
                   } else if (role.id === "patient") {
-                    handlePatientRegister();
+                    openPatientModal();
                   } else {
                     openApplyModal(role.id);
                   }
@@ -586,7 +607,7 @@ export default function Landing() {
             <div className="grid gap-4 sm:grid-cols-2">
               {/* Patient — instant registration */}
               <button
-                onClick={handlePatientRegister}
+                onClick={openPatientModal}
                 disabled={registering || !!pendingApp}
                 className="flex flex-col rounded-xl border p-5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed bg-teal-500/10 text-teal-400 border-teal-500/20"
               >
@@ -729,6 +750,20 @@ export default function Landing() {
                   className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
                 />
               </div>
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Hospital *</label>
+                <input
+                  type="text"
+                  value={applyHospital}
+                  onChange={(e) => setApplyHospital(e.target.value)}
+                  placeholder="apollo-bangalore"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Exact hospital identifier registered by super admin. Case-insensitive. Only an admin from this hospital can approve you.
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -740,10 +775,54 @@ export default function Landing() {
               </button>
               <button
                 onClick={handleApply}
-                disabled={registering || !applyName || !applyCred}
+                disabled={registering || !applyName || !applyCred || !applyHospital}
                 className="flex-1 rounded-lg bg-teal-500 py-2.5 text-sm font-medium text-white hover:bg-teal-600 transition-colors disabled:opacity-50"
               >
                 {registering ? "Submitting..." : "Submit Application"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Patient Registration Modal ── */}
+      {showPatientModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151a20] p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold">Register as Patient</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Your name will be visible to doctors who you grant record access. Stored on-chain via PatientRegistry.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Full name *</label>
+                <input
+                  type="text"
+                  value={patientName}
+                  onChange={(e) => setPatientName(e.target.value)}
+                  placeholder="Anjali Krishnan"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowPatientModal(false); setShowRoleModal(true); }}
+                className="flex-1 rounded-lg border border-white/10 py-2.5 text-sm text-slate-400 hover:bg-white/5 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handlePatientRegister}
+                disabled={registering || !patientName.trim()}
+                className="flex-1 rounded-lg bg-teal-500 py-2.5 text-sm font-medium text-white hover:bg-teal-600 transition-colors disabled:opacity-50"
+              >
+                {registering ? "Registering..." : "Register"}
               </button>
             </div>
           </div>
