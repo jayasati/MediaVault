@@ -15,7 +15,7 @@ async function main() {
   console.log("-".repeat(60));
 
   // 1. Deploy MEDIToken
-  console.log("\n[1/3] Deploying MEDIToken...");
+  console.log("\n[1/5] Deploying MEDIToken...");
   const MEDIToken = await hre.ethers.getContractFactory("MEDIToken");
   const mediToken = await MEDIToken.deploy();
   await mediToken.waitForDeployment();
@@ -23,7 +23,7 @@ async function main() {
   console.log("  MEDIToken deployed to:", mediTokenAddress);
 
   // 2. Deploy PatientRegistry
-  console.log("\n[2/3] Deploying PatientRegistry...");
+  console.log("\n[2/5] Deploying PatientRegistry...");
   const PatientRegistry = await hre.ethers.getContractFactory("PatientRegistry");
   const patientRegistry = await PatientRegistry.deploy();
   await patientRegistry.waitForDeployment();
@@ -31,21 +31,45 @@ async function main() {
   console.log("  PatientRegistry deployed to:", patientRegistryAddress);
 
   // 3. Deploy MediAccessControl (needs PatientRegistry address)
-  console.log("\n[3/3] Deploying MediAccessControl...");
+  console.log("\n[3/5] Deploying MediAccessControl...");
   const MediAccessControl = await hre.ethers.getContractFactory("MediAccessControl");
   const accessControl = await MediAccessControl.deploy(patientRegistryAddress);
   await accessControl.waitForDeployment();
   const accessControlAddress = await accessControl.getAddress();
   console.log("  MediAccessControl deployed to:", accessControlAddress);
 
+  // 4. Deploy PrescriptionManager (needs MediAccessControl address)
+  console.log("\n[4/5] Deploying PrescriptionManager...");
+  const PrescriptionManager = await hre.ethers.getContractFactory("PrescriptionManager");
+  const prescriptionManager = await PrescriptionManager.deploy(accessControlAddress);
+  await prescriptionManager.waitForDeployment();
+  const prescriptionManagerAddress = await prescriptionManager.getAddress();
+  console.log("  PrescriptionManager deployed to:", prescriptionManagerAddress);
+
+  // 5. Deploy EmergencyAccess (needs PatientRegistry address)
+  console.log("\n[5/5] Deploying EmergencyAccess...");
+  const EmergencyAccess = await hre.ethers.getContractFactory("EmergencyAccess");
+  const emergencyAccess = await EmergencyAccess.deploy(patientRegistryAddress);
+  await emergencyAccess.waitForDeployment();
+  const emergencyAccessAddress = await emergencyAccess.getAddress();
+  console.log("  EmergencyAccess deployed to:", emergencyAccessAddress);
+
   // Summary
   console.log("\n" + "=".repeat(60));
   console.log("Phase 1 Deployment Complete!");
   console.log("=".repeat(60));
-  console.log("  MEDIToken:          ", mediTokenAddress);
-  console.log("  PatientRegistry:    ", patientRegistryAddress);
-  console.log("  MediAccessControl:  ", accessControlAddress);
+  console.log("  MEDIToken:             ", mediTokenAddress);
+  console.log("  PatientRegistry:       ", patientRegistryAddress);
+  console.log("  MediAccessControl:     ", accessControlAddress);
+  console.log("  PrescriptionManager:   ", prescriptionManagerAddress);
+  console.log("  EmergencyAccess:       ", emergencyAccessAddress);
   console.log("=".repeat(60));
+
+  // QR code data for first 3 patient IDs
+  console.log("\n--- Emergency QR Code Data ---");
+  for (let id = 1; id <= 3; id++) {
+    console.log(`  Patient #${id}: medivault://emergency/${id}/${emergencyAccessAddress}`);
+  }
 
   // Save deployment addresses to JSON
   const deployment = {
@@ -55,6 +79,8 @@ async function main() {
       MEDIToken: mediTokenAddress,
       PatientRegistry: patientRegistryAddress,
       MediAccessControl: accessControlAddress,
+      PrescriptionManager: prescriptionManagerAddress,
+      EmergencyAccess: emergencyAccessAddress,
     },
   };
 

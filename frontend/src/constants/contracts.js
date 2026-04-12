@@ -1,8 +1,10 @@
 import MEDITokenArtifact from "../../../blockchain/artifacts/contracts/MEDIToken.sol/MEDIToken.json";
 import PatientRegistryArtifact from "../../../blockchain/artifacts/contracts/PatientRegistry.sol/PatientRegistry.json";
 import MediAccessControlArtifact from "../../../blockchain/artifacts/contracts/MediAccessControl.sol/MediAccessControl.json";
+import PrescriptionManagerArtifact from "../../../blockchain/artifacts/contracts/PrescriptionManager.sol/PrescriptionManager.json";
+import EmergencyAccessArtifact from "../../../blockchain/artifacts/contracts/EmergencyAccess.sol/EmergencyAccess.json";
 
-// Addresses — prefer env vars (set after deployment), fall back to deployment JSON
+// Addresses — prefer env vars (set after deployment), fall back to empty
 const env = import.meta.env;
 
 export const CONTRACTS = {
@@ -17,6 +19,14 @@ export const CONTRACTS = {
   MediAccessControl: {
     address: env.VITE_ACCESS_CONTROL_ADDRESS || "",
     abi: MediAccessControlArtifact.abi,
+  },
+  PrescriptionManager: {
+    address: env.VITE_PRESCRIPTION_MANAGER_ADDRESS || "",
+    abi: PrescriptionManagerArtifact.abi,
+  },
+  EmergencyAccess: {
+    address: env.VITE_EMERGENCY_ACCESS_ADDRESS || "",
+    abi: EmergencyAccessArtifact.abi,
   },
 };
 
