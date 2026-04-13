@@ -13,7 +13,7 @@ describe("ClinicalRecordManager", function () {
 
   async function setupDoctorWithAccess() {
     // Register patient
-    await roleManager.connect(patient).registerAsPatient();
+    await roleManager.connect(patient).registerAsPatient("Alice");
     await registry.connect(patient).registerPatient("Alice", "O+", "Peanuts", "QmEmergency");
     // Approve doctor1 via RoleManager
     await roleManager
@@ -44,7 +44,7 @@ describe("ClinicalRecordManager", function () {
       await roleManager.getAddress()
     );
 
-    await roleManager.addAdmin(admin1.address, APOLLO);
+    await roleManager.addAdmin(admin1.address, APOLLO, "Hospital Admin");
   });
 
   describe("Direct Record Upload", function () {
@@ -227,7 +227,7 @@ describe("ClinicalRecordManager", function () {
     it("should add to treatment history on ratification", async function () {
       // Clean slate patient — different from setupDoctorWithAccess's
       const [, , , , , other] = await ethers.getSigners();
-      await roleManager.connect(other).registerAsPatient();
+      await roleManager.connect(other).registerAsPatient("Bob");
       await registry.connect(other).registerPatient("Bob", "A+", "None", "Qm");
       await crm
         .connect(other)

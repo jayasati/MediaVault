@@ -18,6 +18,7 @@ describe("RoleManager — Hospital Registry", function () {
     stateName: "Tamil Nadu",
     registrationNumber: "NABH-TN-0001",
     documentsIPFS: "QmApolloDocs",
+    adminName: "Priya Sharma",
   };
 
   const NARAYANA = {
@@ -26,6 +27,7 @@ describe("RoleManager — Hospital Registry", function () {
     stateName: "Karnataka",
     registrationNumber: "NABH-KA-0099",
     documentsIPFS: "QmNarayanaDocs",
+    adminName: "Rajesh Gupta",
   };
 
   const apolloId = ethers.keccak256(ethers.solidityPacked(["string"], [APOLLO.registrationNumber]));
@@ -39,7 +41,7 @@ describe("RoleManager — Hospital Registry", function () {
   const apply = (signer, h) =>
     roleManager
       .connect(signer)
-      .applyForHospital(h.name, h.city, h.stateName, h.registrationNumber, h.documentsIPFS);
+      .applyForHospital(h.name, h.city, h.stateName, h.registrationNumber, h.documentsIPFS, h.adminName);
 
   describe("applyForHospital", function () {
     it("submits an application and emits HospitalApplied", async function () {
@@ -56,14 +58,20 @@ describe("RoleManager — Hospital Registry", function () {
 
     it("rejects empty registration number", async function () {
       await expect(
-        roleManager.connect(applicant).applyForHospital(APOLLO.name, APOLLO.city, APOLLO.stateName, "", APOLLO.documentsIPFS)
+        roleManager.connect(applicant).applyForHospital(APOLLO.name, APOLLO.city, APOLLO.stateName, "", APOLLO.documentsIPFS, APOLLO.adminName)
       ).to.be.revertedWith("Registration number required");
     });
 
     it("rejects empty IPFS CID", async function () {
       await expect(
-        roleManager.connect(applicant).applyForHospital(APOLLO.name, APOLLO.city, APOLLO.stateName, APOLLO.registrationNumber, "")
+        roleManager.connect(applicant).applyForHospital(APOLLO.name, APOLLO.city, APOLLO.stateName, APOLLO.registrationNumber, "", APOLLO.adminName)
       ).to.be.revertedWith("Documents IPFS CID required");
+    });
+
+    it("rejects empty admin name", async function () {
+      await expect(
+        roleManager.connect(applicant).applyForHospital(APOLLO.name, APOLLO.city, APOLLO.stateName, APOLLO.registrationNumber, APOLLO.documentsIPFS, "")
+      ).to.be.revertedWith("Admin name required");
     });
 
     it("rejects application from existing privileged user (doctor)", async function () {
@@ -74,7 +82,7 @@ describe("RoleManager — Hospital Registry", function () {
     });
 
     it("allows patient to apply (upgrade path)", async function () {
-      await roleManager.connect(applicant).registerAsPatient();
+      await roleManager.connect(applicant).registerAsPatient("Ramesh Kumar");
       await expect(apply(applicant, APOLLO)).to.emit(roleManager, "HospitalApplied");
     });
 
@@ -106,6 +114,8 @@ describe("RoleManager — Hospital Registry", function () {
       expect(await roleManager.getRole(applicant.address)).to.equal(Role.ADMIN);
       const details = await roleManager.getUserDetails(applicant.address);
       expect(details.hospitalId).to.equal(apolloId);
+      expect(details.displayName).to.equal(APOLLO.adminName);
+      expect(details.profileIPFS).to.equal(APOLLO.documentsIPFS);
 
       const hospital = await roleManager.getHospital(apolloId);
       expect(hospital.active).to.be.true;

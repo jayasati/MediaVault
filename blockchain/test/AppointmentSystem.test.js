@@ -23,8 +23,8 @@ describe("AppointmentSystem", function () {
     const AppointmentSystem = await ethers.getContractFactory("AppointmentSystem");
     appointments = await AppointmentSystem.deploy(await roleManager.getAddress());
 
-    await roleManager.addAdmin(admin1.address, APOLLO);
-    await roleManager.connect(patient).registerAsPatient();
+    await roleManager.addAdmin(admin1.address, APOLLO, "Hospital Admin");
+    await roleManager.connect(patient).registerAsPatient("Test Patient");
   });
 
   describe("Doctor Profile", function () {

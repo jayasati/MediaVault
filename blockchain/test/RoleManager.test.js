@@ -36,38 +36,60 @@ describe("RoleManager", function () {
 
   describe("Patient Self-Registration", function () {
     it("should allow anyone to register as patient", async function () {
-      await roleManager.connect(patient).registerAsPatient();
+      await roleManager.connect(patient).registerAsPatient("Ramesh Kumar");
       expect(await roleManager.getRole(patient.address)).to.equal(Role.PATIENT);
+      const details = await roleManager.getUserDetails(patient.address);
+      expect(details.displayName).to.equal("Ramesh Kumar");
+    });
+
+    it("should reject registration without display name", async function () {
+      await expect(
+        roleManager.connect(patient).registerAsPatient("")
+      ).to.be.revertedWith("Display name required");
     });
 
     it("should reject duplicate registration", async function () {
-      await roleManager.connect(patient).registerAsPatient();
-      await expect(roleManager.connect(patient).registerAsPatient()).to.be.revertedWith("Already registered");
+      await roleManager.connect(patient).registerAsPatient("Ramesh Kumar");
+      await expect(roleManager.connect(patient).registerAsPatient("Ramesh Kumar")).to.be.revertedWith("Already registered");
     });
   });
 
   describe("Admin Management (Super Admin Only)", function () {
     it("should allow super admin to add hospital admin", async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
       expect(await roleManager.getRole(admin1.address)).to.equal(Role.ADMIN);
       const details = await roleManager.getUserDetails(admin1.address);
       expect(details.hospitalId).to.equal(APOLLO);
+      expect(details.displayName).to.equal("Priya Sharma");
+    });
+
+    it("should reject addAdmin without display name", async function () {
+      await expect(
+        roleManager.addAdmin(admin1.address, APOLLO, "")
+      ).to.be.revertedWith("Display name required");
+    });
+
+    it("should reject display name longer than 64 chars", async function () {
+      const tooLong = "x".repeat(65);
+      await expect(
+        roleManager.addAdmin(admin1.address, APOLLO, tooLong)
+      ).to.be.revertedWith("Display name too long");
     });
 
     it("should reject admin add without hospitalId", async function () {
       await expect(
-        roleManager.addAdmin(admin1.address, ethers.ZeroHash)
+        roleManager.addAdmin(admin1.address, ethers.ZeroHash, "Priya Sharma")
       ).to.be.revertedWith("Hospital ID required");
     });
 
     it("should reject non-super-admin adding admin", async function () {
       await expect(
-        roleManager.connect(stranger).addAdmin(admin1.address, APOLLO)
+        roleManager.connect(stranger).addAdmin(admin1.address, APOLLO, "Priya Sharma")
       ).to.be.revertedWith("Only super admin");
     });
 
     it("should allow super admin to remove admin", async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
       await roleManager.removeAdmin(admin1.address);
       expect(await roleManager.getRole(admin1.address)).to.equal(Role.NONE);
       const details = await roleManager.getUserDetails(admin1.address);
@@ -75,14 +97,14 @@ describe("RoleManager", function () {
     });
 
     it("should emit AdminAdded event with hospitalId", async function () {
-      await expect(roleManager.addAdmin(admin1.address, APOLLO))
+      await expect(roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma"))
         .to.emit(roleManager, "AdminAdded").withArgs(admin1.address, APOLLO, superAdmin.address);
     });
   });
 
   describe("Doctor / Researcher Application", function () {
     beforeEach(async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
     });
 
     it("should allow applying for doctor at a hospital", async function () {
@@ -122,8 +144,8 @@ describe("RoleManager", function () {
 
   describe("Approval with Hospital Scoping", function () {
     beforeEach(async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
-      await roleManager.addAdmin(adminOther.address, NARAYANA);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
+      await roleManager.addAdmin(adminOther.address, NARAYANA, "Other Admin");
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr. Smith", "Cardiology", "MCI-12345");
     });
 
@@ -168,11 +190,25 @@ describe("RoleManager", function () {
       const details = await roleManager.getUserDetails(doctor.address);
       expect(details.hospitalId).to.equal(APOLLO);
     });
+
+    it("should store displayName and specialization on doctor approval", async function () {
+      await roleManager.connect(admin1).approveApplication(1);
+      const details = await roleManager.getUserDetails(doctor.address);
+      expect(details.displayName).to.equal("Dr. Smith");
+      expect(details.specialization).to.equal("Cardiology");
+    });
+  });
+
+  describe("Super Admin Profile", function () {
+    it("should set super admin displayName to 'Super Admin'", async function () {
+      const details = await roleManager.getUserDetails(superAdmin.address);
+      expect(details.displayName).to.equal("Super Admin");
+    });
   });
 
   describe("Application Cooldown", function () {
     beforeEach(async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
     });
 
     it("should reject re-application within cooldown period", async function () {
@@ -208,7 +244,7 @@ describe("RoleManager", function () {
 
   describe("Application Expiry", function () {
     beforeEach(async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI");
     });
 
@@ -247,8 +283,8 @@ describe("RoleManager", function () {
 
   describe("Hospital-Filtered Pending Applications", function () {
     beforeEach(async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
-      await roleManager.addAdmin(adminOther.address, NARAYANA);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
+      await roleManager.addAdmin(adminOther.address, NARAYANA, "Other Admin");
 
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr. A", "Card", "MCI-1");
       await roleManager.connect(researcher).applyForRole(Role.RESEARCHER, NARAYANA, "Dr. B", "", "PHD-1");
@@ -276,8 +312,8 @@ describe("RoleManager", function () {
 
   describe("Revocation with Hospital Scoping", function () {
     beforeEach(async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
-      await roleManager.addAdmin(adminOther.address, NARAYANA);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
+      await roleManager.addAdmin(adminOther.address, NARAYANA, "Other Admin");
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI");
       await roleManager.connect(admin1).approveApplication(1);
     });
@@ -307,14 +343,14 @@ describe("RoleManager", function () {
 
   describe("Security: Cannot Bypass Role System", function () {
     it("patient cannot call admin functions", async function () {
-      await roleManager.connect(patient).registerAsPatient();
+      await roleManager.connect(patient).registerAsPatient("Ramesh Kumar");
       await expect(
-        roleManager.connect(patient).addAdmin(stranger.address, APOLLO)
+        roleManager.connect(patient).addAdmin(stranger.address, APOLLO, "Hack")
       ).to.be.revertedWith("Only super admin");
     });
 
     it("doctor cannot approve other applications", async function () {
-      await roleManager.addAdmin(admin1.address, APOLLO);
+      await roleManager.addAdmin(admin1.address, APOLLO, "Priya Sharma");
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI");
       await roleManager.connect(admin1).approveApplication(1);
 

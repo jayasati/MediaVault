@@ -24,6 +24,7 @@ contract RoleManager is ReentrancyGuard {
 
     uint256 public constant APPLICATION_COOLDOWN = 7 days;
     uint256 public constant APPLICATION_TTL = 14 days;
+    uint256 public constant MAX_DISPLAY_NAME_LENGTH = 64;
 
     struct UserRole {
         address wallet;
@@ -32,6 +33,9 @@ contract RoleManager is ReentrancyGuard {
         uint256 registeredAt;
         address approvedBy;
         bytes32 hospitalId; // 0 for super admin / patients
+        string displayName;
+        string specialization;
+        string profileIPFS;
     }
 
     struct Application {
@@ -70,6 +74,7 @@ contract RoleManager is ReentrancyGuard {
         string stateName;
         string registrationNumber;
         string documentsIPFS;
+        string adminName;
         ApplicationStatus status;
         uint256 appliedAt;
         uint256 respondedAt;
@@ -123,30 +128,40 @@ contract RoleManager is ReentrancyGuard {
             isActive: true,
             registeredAt: block.timestamp,
             approvedBy: msg.sender,
-            hospitalId: bytes32(0)
+            hospitalId: bytes32(0),
+            displayName: "Super Admin",
+            specialization: "",
+            profileIPFS: ""
         });
     }
 
     // ── Patient: self-registration ──
 
-    function registerAsPatient() external {
+    function registerAsPatient(string calldata displayName) external {
         require(users[msg.sender].role == Role.NONE, "Already registered");
+        require(bytes(displayName).length > 0, "Display name required");
+        require(bytes(displayName).length <= MAX_DISPLAY_NAME_LENGTH, "Display name too long");
         users[msg.sender] = UserRole({
             wallet: msg.sender,
             role: Role.PATIENT,
             isActive: true,
             registeredAt: block.timestamp,
             approvedBy: address(0),
-            hospitalId: bytes32(0)
+            hospitalId: bytes32(0),
+            displayName: displayName,
+            specialization: "",
+            profileIPFS: ""
         });
         emit PatientRegistered(msg.sender);
     }
 
     // ── Super admin: manage admins ──
 
-    function addAdmin(address wallet, bytes32 hospitalId) external onlySuperAdmin {
+    function addAdmin(address wallet, bytes32 hospitalId, string calldata displayName) external onlySuperAdmin {
         require(wallet != address(0), "Invalid address");
         require(hospitalId != bytes32(0), "Hospital ID required");
+        require(bytes(displayName).length > 0, "Display name required");
+        require(bytes(displayName).length <= MAX_DISPLAY_NAME_LENGTH, "Display name too long");
         require(
             users[wallet].role == Role.NONE || users[wallet].role == Role.PATIENT,
             "Already has a role"
@@ -157,7 +172,10 @@ contract RoleManager is ReentrancyGuard {
             isActive: true,
             registeredAt: block.timestamp,
             approvedBy: msg.sender,
-            hospitalId: hospitalId
+            hospitalId: hospitalId,
+            displayName: displayName,
+            specialization: "",
+            profileIPFS: ""
         });
         emit AdminAdded(wallet, hospitalId, msg.sender);
     }
@@ -168,6 +186,9 @@ contract RoleManager is ReentrancyGuard {
         users[wallet].role = Role.NONE;
         users[wallet].isActive = false;
         users[wallet].hospitalId = bytes32(0);
+        users[wallet].displayName = "";
+        users[wallet].specialization = "";
+        users[wallet].profileIPFS = "";
         if (prevHospital != bytes32(0) && hospitals[prevHospital].currentAdmin == wallet) {
             hospitals[prevHospital].currentAdmin = address(0);
             hospitals[prevHospital].active = false;
@@ -182,7 +203,8 @@ contract RoleManager is ReentrancyGuard {
         string calldata city,
         string calldata stateName,
         string calldata registrationNumber,
-        string calldata documentsIPFS
+        string calldata documentsIPFS,
+        string calldata adminName
     ) external {
         require(
             users[msg.sender].role == Role.NONE || users[msg.sender].role == Role.PATIENT,
@@ -193,6 +215,8 @@ contract RoleManager is ReentrancyGuard {
         require(bytes(stateName).length > 0, "State required");
         require(bytes(registrationNumber).length > 0, "Registration number required");
         require(bytes(documentsIPFS).length > 0, "Documents IPFS CID required");
+        require(bytes(adminName).length > 0, "Admin name required");
+        require(bytes(adminName).length <= MAX_DISPLAY_NAME_LENGTH, "Admin name too long");
 
         bytes32 hospitalId = keccak256(abi.encodePacked(registrationNumber));
         require(!hospitals[hospitalId].active, "Hospital already registered");
@@ -225,6 +249,7 @@ contract RoleManager is ReentrancyGuard {
             stateName: stateName,
             registrationNumber: registrationNumber,
             documentsIPFS: documentsIPFS,
+            adminName: adminName,
             status: ApplicationStatus.PENDING,
             appliedAt: block.timestamp,
             respondedAt: 0,
@@ -270,7 +295,10 @@ contract RoleManager is ReentrancyGuard {
             isActive: true,
             registeredAt: block.timestamp,
             approvedBy: msg.sender,
-            hospitalId: app.hospitalId
+            hospitalId: app.hospitalId,
+            displayName: app.adminName,
+            specialization: "",
+            profileIPFS: app.documentsIPFS
         });
 
         emit HospitalApproved(applicationId, app.hospitalId, app.applicant);
@@ -429,7 +457,10 @@ contract RoleManager is ReentrancyGuard {
             isActive: true,
             registeredAt: block.timestamp,
             approvedBy: msg.sender,
-            hospitalId: app.hospitalId
+            hospitalId: app.hospitalId,
+            displayName: app.name,
+            specialization: app.specialization,
+            profileIPFS: ""
         });
 
         emit ApplicationApproved(applicationId, app.applicant, app.requestedRole, msg.sender);
@@ -478,6 +509,9 @@ contract RoleManager is ReentrancyGuard {
         users[wallet].role = Role.NONE;
         users[wallet].isActive = false;
         users[wallet].hospitalId = bytes32(0);
+        users[wallet].displayName = "";
+        users[wallet].specialization = "";
+        users[wallet].profileIPFS = "";
         emit RoleRevoked(wallet, prev, msg.sender);
     }
 
