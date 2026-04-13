@@ -11,6 +11,7 @@ import {
   Stethoscope,
   Settings,
   FlaskConical,
+  Building2,
   FileText,
   Pill,
   QrCode,
@@ -126,6 +127,15 @@ export default function Landing() {
   // Patient registration modal
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [patientName, setPatientName] = useState("");
+
+  // Hospital admin application modal
+  const [showHospitalModal, setShowHospitalModal] = useState(false);
+  const [hospName, setHospName] = useState("");
+  const [hospCity, setHospCity] = useState("");
+  const [hospState, setHospState] = useState("");
+  const [hospRegNum, setHospRegNum] = useState("");
+  const [hospDocsCID, setHospDocsCID] = useState("");
+  const [hospAdminName, setHospAdminName] = useState("");
 
   // Check on-chain role and pending application — usable as initial check + refresh
   const checkRole = useCallback(async (silent = false) => {
@@ -315,6 +325,46 @@ export default function Landing() {
     setApplyRole(roleType);
     setShowRoleModal(false);
     setShowApplyModal(true);
+  };
+
+  const openHospitalModal = () => {
+    setShowRoleModal(false);
+    setShowHospitalModal(true);
+  };
+
+  const handleHospitalApply = async () => {
+    if (!roleManager) return;
+    if (!hospName.trim() || !hospCity.trim() || !hospState.trim() || !hospRegNum.trim() || !hospDocsCID.trim() || !hospAdminName.trim()) {
+      toast.error("All fields are required");
+      return;
+    }
+    setRegistering(true);
+    const tid = toast.loading("Submitting hospital application...");
+    try {
+      const tx = await roleManager.applyForHospital(
+        hospName.trim(),
+        hospCity.trim(),
+        hospState.trim(),
+        hospRegNum.trim(),
+        hospDocsCID.trim(),
+        hospAdminName.trim()
+      );
+      await tx.wait();
+      toast.success("Application submitted! Super Admin will review it.", { id: tid });
+      setShowHospitalModal(false);
+      setHospName(""); setHospCity(""); setHospState("");
+      setHospRegNum(""); setHospDocsCID(""); setHospAdminName("");
+      checkRole();
+    } catch (err) {
+      const msg = err.reason || err.shortMessage || err.message || "Application failed";
+      if (err.code === "ACTION_REJECTED") {
+        toast.error("Transaction rejected", { id: tid });
+      } else {
+        toast.error(msg, { id: tid });
+      }
+    } finally {
+      setRegistering(false);
+    }
   };
 
   return (
@@ -581,7 +631,7 @@ export default function Landing() {
       {/* ── Role Selection Modal ── */}
       {showRoleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#151a20] p-8">
+          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#151a20] p-8 max-h-[90vh] overflow-y-auto">
             <div className="mb-6 text-center">
               <h2 className="text-xl font-bold">Get started with MediVault</h2>
               <p className="mt-1 text-sm text-slate-400">
@@ -750,6 +800,37 @@ export default function Landing() {
                 </ul>
               </button>
 
+              {/* Hospital Admin — apply */}
+              <button
+                onClick={openHospitalModal}
+                disabled={registering || !!pendingApp}
+                className="flex flex-col rounded-xl border p-5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed bg-amber-500/10 text-amber-400 border-amber-500/20"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/20">
+                    <Building2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-white">Hospital Admin</span>
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Super Admin approval</span>
+                  </div>
+                </div>
+                <ul className="space-y-1 text-[11px] text-slate-400">
+                  <li className="flex items-start gap-2">
+                    <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
+                    Onboard your hospital onto MediVault
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
+                    Approve doctors & researchers
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ChevronRight className="mt-0.5 h-3 w-3 flex-shrink-0 text-teal-500" />
+                    Submit registration documents on-chain
+                  </li>
+                </ul>
+              </button>
+
             </div>
 
             <button
@@ -846,6 +927,117 @@ export default function Landing() {
               <button
                 onClick={handleApply}
                 disabled={registering || !applyName || !applyCred || !applyHospital}
+                className="flex-1 rounded-lg bg-teal-500 py-2.5 text-sm font-medium text-white hover:bg-teal-600 transition-colors disabled:opacity-50"
+              >
+                {registering ? "Submitting..." : "Submit Application"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Hospital Admin Application Modal ── */}
+      {showHospitalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#151a20] p-8 max-h-[90vh] overflow-y-auto">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold">Apply to Onboard a Hospital</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                The Super Admin (national medical authority) will review your application. On approval, your wallet becomes the Admin for this hospital.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Hospital legal name *</label>
+                <input
+                  type="text"
+                  value={hospName}
+                  onChange={(e) => setHospName(e.target.value)}
+                  placeholder="Apollo Hospitals Chennai"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">City *</label>
+                  <input
+                    type="text"
+                    value={hospCity}
+                    onChange={(e) => setHospCity(e.target.value)}
+                    placeholder="Chennai"
+                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">State *</label>
+                  <input
+                    type="text"
+                    value={hospState}
+                    onChange={(e) => setHospState(e.target.value)}
+                    placeholder="Tamil Nadu"
+                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Registration number (NABH / state health dept) *</label>
+                <input
+                  type="text"
+                  value={hospRegNum}
+                  onChange={(e) => setHospRegNum(e.target.value)}
+                  placeholder="NABH-TN-0001"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Used as the unique on-chain hospital identifier. Must be unique nationally.
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Documents IPFS CID *</label>
+                <input
+                  type="text"
+                  value={hospDocsCID}
+                  onChange={(e) => setHospDocsCID(e.target.value)}
+                  placeholder="QmXkqfP4tEXamplePinataCidForDocs"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Phase 4 will replace this with file uploads. For now paste any placeholder string (e.g. <code>QmTest123</code>).
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Your name (the admin) *</label>
+                <input
+                  type="text"
+                  value={hospAdminName}
+                  onChange={(e) => setHospAdminName(e.target.value)}
+                  placeholder="Priya Sharma"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Will be displayed in admin lists. Max 64 characters.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowHospitalModal(false); setShowRoleModal(true); }}
+                className="flex-1 rounded-lg border border-white/10 py-2.5 text-sm text-slate-400 hover:bg-white/5 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleHospitalApply}
+                disabled={
+                  registering || !hospName.trim() || !hospCity.trim() || !hospState.trim()
+                  || !hospRegNum.trim() || !hospDocsCID.trim() || !hospAdminName.trim()
+                }
                 className="flex-1 rounded-lg bg-teal-500 py-2.5 text-sm font-medium text-white hover:bg-teal-600 transition-colors disabled:opacity-50"
               >
                 {registering ? "Submitting..." : "Submit Application"}
