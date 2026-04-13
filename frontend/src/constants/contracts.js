@@ -4,6 +4,8 @@ import MediAccessControlArtifact from "../../../blockchain/artifacts/contracts/M
 import PrescriptionManagerArtifact from "../../../blockchain/artifacts/contracts/PrescriptionManager.sol/PrescriptionManager.json";
 import EmergencyAccessArtifact from "../../../blockchain/artifacts/contracts/EmergencyAccess.sol/EmergencyAccess.json";
 import RoleManagerArtifact from "../../../blockchain/artifacts/contracts/RoleManager.sol/RoleManager.json";
+import ClinicalRecordManagerArtifact from "../../../blockchain/artifacts/contracts/ClinicalRecordManager.sol/ClinicalRecordManager.json";
+import AppointmentSystemArtifact from "../../../blockchain/artifacts/contracts/AppointmentSystem.sol/AppointmentSystem.json";
 
 // Addresses — prefer env vars (set after deployment), fall back to empty
 const env = import.meta.env;
@@ -32,6 +34,14 @@ export const CONTRACTS = {
   RoleManager: {
     address: env.VITE_ROLE_MANAGER_ADDRESS || "",
     abi: RoleManagerArtifact.abi,
+  },
+  ClinicalRecordManager: {
+    address: env.VITE_CLINICAL_RECORD_MANAGER_ADDRESS || "",
+    abi: ClinicalRecordManagerArtifact.abi,
+  },
+  AppointmentSystem: {
+    address: env.VITE_APPOINTMENT_SYSTEM_ADDRESS || "",
+    abi: AppointmentSystemArtifact.abi,
   },
 };
 

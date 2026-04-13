@@ -10,6 +10,8 @@ import {
   Wallet,
   LogOut,
   AlertTriangle,
+  Search,
+  Calendar,
 } from "lucide-react";
 import useWallet from "@/hooks/useWallet";
 import useRoleGuard from "@/hooks/useRoleGuard";
@@ -21,8 +23,12 @@ import EmergencyTab from "@/components/patient/EmergencyTab";
 import EarningsTab from "@/components/patient/EarningsTab";
 import ComplianceTab from "@/components/patient/ComplianceTab";
 import BillingTab from "@/components/patient/BillingTab";
+import BookAppointmentTab from "@/components/patient/BookAppointmentTab";
+import MyAppointmentsTab from "@/components/patient/MyAppointmentsTab";
 
 const TABS = [
+  { id: "find-doctor", label: "Find doctor", icon: Search },
+  { id: "appointments", label: "Appointments", icon: Calendar },
   { id: "records", label: "Records", icon: FileText },
   { id: "access", label: "Access", icon: UserPlus },
   { id: "prescriptions", label: "Prescriptions", icon: Pill },
@@ -33,6 +39,8 @@ const TABS = [
 ];
 
 const TAB_COMPONENTS = {
+  "find-doctor": BookAppointmentTab,
+  appointments: MyAppointmentsTab,
   records: RecordsTab,
   access: AccessTab,
   prescriptions: PrescriptionsTab,
@@ -45,7 +53,7 @@ const TAB_COMPONENTS = {
 export default function PatientDashboard() {
   const { walletAddress, isConnected, isCorrectNetwork, connect, disconnect, switchToSepolia } = useWallet();
   const { verified, checking, timedOut, retry } = useRoleGuard("patient");
-  const [activeTab, setActiveTab] = useState("records");
+  const [activeTab, setActiveTab] = useState("find-doctor");
 
   if (timedOut) {
     return (

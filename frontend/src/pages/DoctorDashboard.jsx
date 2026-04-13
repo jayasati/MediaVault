@@ -9,6 +9,8 @@ import {
   Wallet,
   AlertTriangle,
   ShieldCheck,
+  Calendar,
+  User,
 } from "lucide-react";
 import useWallet from "@/hooks/useWallet";
 import useRoleGuard from "@/hooks/useRoleGuard";
@@ -18,27 +20,33 @@ import AccessRequestsTab from "@/components/doctor/AccessRequestsTab";
 import PrescriptionsWrittenTab from "@/components/doctor/PrescriptionsWrittenTab";
 import OpinionsTab from "@/components/doctor/OpinionsTab";
 import ReputationTab from "@/components/doctor/ReputationTab";
+import AppointmentsTab from "@/components/doctor/AppointmentsTab";
+import ProfileSetupTab from "@/components/doctor/ProfileSetupTab";
 
 const TABS = [
+  { id: "appointments", label: "Appointments", icon: Calendar },
   { id: "patients", label: "My patients", icon: Users },
   { id: "access", label: "Access requests", icon: Star },
   { id: "prescriptions", label: "Prescriptions", icon: ClipboardList },
   { id: "opinions", label: "Opinions", icon: MessageSquare },
   { id: "reputation", label: "Reputation", icon: Award },
+  { id: "profile", label: "Profile", icon: User },
 ];
 
 const TAB_COMPONENTS = {
+  appointments: AppointmentsTab,
   patients: PatientsTab,
   access: AccessRequestsTab,
   prescriptions: PrescriptionsWrittenTab,
   opinions: OpinionsTab,
   reputation: ReputationTab,
+  profile: ProfileSetupTab,
 };
 
 export default function DoctorDashboard() {
   const { walletAddress, isConnected, isCorrectNetwork, disconnect, switchToSepolia } = useWallet();
   const { verified, checking, timedOut, retry } = useRoleGuard("doctor");
-  const [activeTab, setActiveTab] = useState("patients");
+  const [activeTab, setActiveTab] = useState("appointments");
 
   if (timedOut) {
     return (

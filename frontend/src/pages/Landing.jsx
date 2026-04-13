@@ -207,7 +207,8 @@ export default function Landing() {
     setShowPatientModal(true);
   };
 
-  // Handle patient registration (self-serve)
+  // Handle patient registration — skip view calls (avoids stale-ABI decode errors)
+  // and just attempt each write, treating "already registered" as success (idempotent).
   const handlePatientRegister = async () => {
     if (!roleManager || !patientRegistry) return;
     if (!patientName.trim()) {
@@ -216,23 +217,60 @@ export default function Landing() {
     }
     setRegistering(true);
     const tid = toast.loading("Registering as Patient...");
+
+    const isAlreadyRegistered = (e) => {
+      const parts = [e?.reason, e?.shortMessage, e?.message, e?.info?.error?.message].filter(Boolean);
+      const combined = parts.join(" ").toLowerCase();
+      return combined.includes("already registered");
+    };
+
     try {
-      // Register role on RoleManager
-      const tx1 = await roleManager.registerAsPatient();
-      await tx1.wait();
-      // Register on PatientRegistry with the provided name
-      const tx2 = await patientRegistry.registerPatient(patientName.trim(), "", "", "");
-      await tx2.wait();
+      // 1. Register role on RoleManager — tolerate "already registered"
+      try {
+        const tx1 = await roleManager.registerAsPatient();
+        await tx1.wait();
+      } catch (e) {
+        if (isAlreadyRegistered(e)) {
+          console.log("RoleManager: already registered, continuing");
+        } else if (e.code === "ACTION_REJECTED") {
+          throw e;
+        } else {
+          console.error("RoleManager.registerAsPatient failed:", e);
+          throw new Error(
+            "RoleManager: " + (e.reason || e.shortMessage || e.message || "registration failed")
+          );
+        }
+      }
+
+      // 2. Register on PatientRegistry — tolerate "already registered"
+      try {
+        const tx2 = await patientRegistry.registerPatient(patientName.trim(), "", "", "");
+        await tx2.wait();
+      } catch (e) {
+        if (isAlreadyRegistered(e)) {
+          console.log("PatientRegistry: already registered, continuing");
+        } else if (e.code === "ACTION_REJECTED") {
+          throw e;
+        } else {
+          console.error("PatientRegistry.registerPatient failed:", e);
+          throw new Error(
+            "PatientRegistry: " + (e.reason || e.shortMessage || e.message || "registration failed")
+          );
+        }
+      }
+
       setRole("patient");
       toast.success("Registered as Patient!", { id: tid });
       setShowPatientModal(false);
       setPatientName("");
       navigate("/patient");
     } catch (err) {
+      console.error("Patient registration error:", err);
       if (err.code === "ACTION_REJECTED") {
-        toast.error("Transaction rejected", { id: tid });
+        toast.error("Transaction rejected in MetaMask", { id: tid });
       } else {
-        toast.error(err.reason || "Registration failed", { id: tid });
+        const msg = err.reason || err.shortMessage || err.message || "Registration failed";
+        toast.error(msg, { id: tid });
       }
     } finally {
       setRegistering(false);

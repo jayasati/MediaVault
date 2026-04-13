@@ -135,6 +135,37 @@ describe("PatientRegistry", function () {
     });
   });
 
+  describe("Emergency Profile Verification", function () {
+    beforeEach(async function () {
+      await registry.connect(patient1).registerPatient("Alice", "O+", "Peanuts", "QmEm");
+    });
+
+    it("should be unverified initially", async function () {
+      const p = await registry.getPatientByWallet(patient1.address);
+      expect(p.emergencyVerifiedBy).to.equal(ethers.ZeroAddress);
+    });
+
+    it("should allow a doctor to verify emergency profile", async function () {
+      await registry.connect(owner).verifyEmergencyProfile(patient1.address);
+      const p = await registry.getPatientByWallet(patient1.address);
+      expect(p.emergencyVerifiedBy).to.equal(owner.address);
+      expect(p.emergencyVerifiedAt).to.be.gt(0);
+    });
+
+    it("should emit EmergencyProfileVerified event", async function () {
+      await expect(registry.connect(owner).verifyEmergencyProfile(patient1.address))
+        .to.emit(registry, "EmergencyProfileVerified");
+    });
+
+    it("should reset verification when patient updates profile", async function () {
+      await registry.connect(owner).verifyEmergencyProfile(patient1.address);
+      await registry.connect(patient1).updateEmergencyProfile("QmNew");
+      const p = await registry.getPatientByWallet(patient1.address);
+      expect(p.emergencyVerifiedBy).to.equal(ethers.ZeroAddress);
+      expect(p.emergencyVerifiedAt).to.equal(0);
+    });
+  });
+
   describe("Deactivation", function () {
     beforeEach(async function () {
       await registerPatient1();

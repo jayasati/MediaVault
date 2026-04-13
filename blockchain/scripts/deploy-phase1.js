@@ -55,7 +55,7 @@ async function main() {
   console.log("  EmergencyAccess deployed to:", emergencyAccessAddress);
 
   // 6. Deploy RoleManager
-  console.log("\n[6/6] Deploying RoleManager...");
+  console.log("\n[6/8] Deploying RoleManager...");
   const RoleManager = await hre.ethers.getContractFactory("RoleManager");
   const roleManager = await RoleManager.deploy();
   await roleManager.waitForDeployment();
@@ -63,17 +63,35 @@ async function main() {
   console.log("  RoleManager deployed to:", roleManagerAddress);
   console.log("  Super Admin:", deployer.address);
 
+  // 7. Deploy ClinicalRecordManager
+  console.log("\n[7/8] Deploying ClinicalRecordManager...");
+  const ClinicalRecordManager = await hre.ethers.getContractFactory("ClinicalRecordManager");
+  const clinicalRecordManager = await ClinicalRecordManager.deploy(accessControlAddress, roleManagerAddress);
+  await clinicalRecordManager.waitForDeployment();
+  const clinicalRecordManagerAddress = await clinicalRecordManager.getAddress();
+  console.log("  ClinicalRecordManager deployed to:", clinicalRecordManagerAddress);
+
+  // 8. Deploy AppointmentSystem
+  console.log("\n[8/8] Deploying AppointmentSystem...");
+  const AppointmentSystem = await hre.ethers.getContractFactory("AppointmentSystem");
+  const appointmentSystem = await AppointmentSystem.deploy(roleManagerAddress);
+  await appointmentSystem.waitForDeployment();
+  const appointmentSystemAddress = await appointmentSystem.getAddress();
+  console.log("  AppointmentSystem deployed to:", appointmentSystemAddress);
+
   // Summary
   console.log("\n" + "=".repeat(60));
   console.log("Phase 1 Deployment Complete!");
   console.log("=".repeat(60));
-  console.log("  MEDIToken:             ", mediTokenAddress);
-  console.log("  PatientRegistry:       ", patientRegistryAddress);
-  console.log("  MediAccessControl:     ", accessControlAddress);
-  console.log("  PrescriptionManager:   ", prescriptionManagerAddress);
-  console.log("  EmergencyAccess:       ", emergencyAccessAddress);
-  console.log("  RoleManager:           ", roleManagerAddress);
-  console.log("  Super Admin:           ", deployer.address);
+  console.log("  MEDIToken:               ", mediTokenAddress);
+  console.log("  PatientRegistry:         ", patientRegistryAddress);
+  console.log("  MediAccessControl:       ", accessControlAddress);
+  console.log("  PrescriptionManager:     ", prescriptionManagerAddress);
+  console.log("  EmergencyAccess:         ", emergencyAccessAddress);
+  console.log("  RoleManager:             ", roleManagerAddress);
+  console.log("  ClinicalRecordManager:   ", clinicalRecordManagerAddress);
+  console.log("  AppointmentSystem:       ", appointmentSystemAddress);
+  console.log("  Super Admin:             ", deployer.address);
   console.log("=".repeat(60));
 
   // QR code data for first 3 patient IDs
@@ -93,6 +111,8 @@ async function main() {
       PrescriptionManager: prescriptionManagerAddress,
       EmergencyAccess: emergencyAccessAddress,
       RoleManager: roleManagerAddress,
+      ClinicalRecordManager: clinicalRecordManagerAddress,
+      AppointmentSystem: appointmentSystemAddress,
     },
   };
 

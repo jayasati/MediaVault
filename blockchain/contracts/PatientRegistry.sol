@@ -15,6 +15,8 @@ contract PatientRegistry is Ownable, ReentrancyGuard {
         uint256 registeredAt;
         bool isActive;
         bool isEmergencyDonor;
+        address emergencyVerifiedBy;
+        uint256 emergencyVerifiedAt;
     }
 
     uint256 private _patientIdCounter;
@@ -24,6 +26,7 @@ contract PatientRegistry is Ownable, ReentrancyGuard {
 
     event PatientRegistered(uint256 indexed patientId, address indexed wallet);
     event EmergencyProfileUpdated(uint256 indexed patientId, string ipfsHash);
+    event EmergencyProfileVerified(uint256 indexed patientId, address indexed verifiedBy);
     event OrganDonorStatusChanged(uint256 indexed patientId, bool isDonor);
     event PatientDeactivated(uint256 indexed patientId);
 
@@ -54,7 +57,9 @@ contract PatientRegistry is Ownable, ReentrancyGuard {
             allergiesHash: allergies,
             registeredAt: block.timestamp,
             isActive: true,
-            isEmergencyDonor: false
+            isEmergencyDonor: false,
+            emergencyVerifiedBy: address(0),
+            emergencyVerifiedAt: 0
         });
 
         patientIdToAddress[newId] = msg.sender;
@@ -65,7 +70,20 @@ contract PatientRegistry is Ownable, ReentrancyGuard {
     function updateEmergencyProfile(string calldata emergencyIPFSHash) external onlyRegisteredPatient {
         Patient storage p = patientsByWallet[msg.sender];
         p.emergencyIPFSHash = emergencyIPFSHash;
+        // Reset verification on edit — patient-reported changes are unverified until re-confirmed
+        p.emergencyVerifiedBy = address(0);
+        p.emergencyVerifiedAt = 0;
         emit EmergencyProfileUpdated(p.patientId, emergencyIPFSHash);
+    }
+
+    /// @notice A doctor can mark a patient's emergency profile as verified
+    function verifyEmergencyProfile(address patientWallet) external {
+        Patient storage p = patientsByWallet[patientWallet];
+        require(p.walletAddress != address(0), "Patient not registered");
+        require(p.isActive, "Patient not active");
+        p.emergencyVerifiedBy = msg.sender;
+        p.emergencyVerifiedAt = block.timestamp;
+        emit EmergencyProfileVerified(p.patientId, msg.sender);
     }
 
     function toggleOrganDonor() external onlyRegisteredPatient {
