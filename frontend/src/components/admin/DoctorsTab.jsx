@@ -111,9 +111,18 @@ export default function DoctorsTab() {
 
   const handleReject = async (applicationId) => {
     if (!roleManager) return;
+    const reason = window.prompt(
+      "Rejection reason (shown to applicant):",
+      "Credentials could not be verified. Please resubmit with additional documentation."
+    );
+    if (reason === null) return; // user cancelled
+    if (!reason.trim()) {
+      toast.error("Reason is required");
+      return;
+    }
     const tid = toast.loading("Rejecting...");
     try {
-      const tx = await roleManager.rejectApplication(applicationId);
+      const tx = await roleManager.rejectApplication(applicationId, reason.trim());
       await tx.wait();
       toast.success("Application rejected", { id: tid });
       loadApplications();

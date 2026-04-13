@@ -46,6 +46,7 @@ contract RoleManager is ReentrancyGuard {
         uint256 appliedAt;
         uint256 respondedAt;
         address respondedBy;
+        string rejectionReason;
     }
 
     address public superAdmin;
@@ -188,7 +189,8 @@ contract RoleManager is ReentrancyGuard {
             status: ApplicationStatus.PENDING,
             appliedAt: block.timestamp,
             respondedAt: 0,
-            respondedBy: address(0)
+            respondedBy: address(0),
+            rejectionReason: ""
         });
 
         latestApplication[msg.sender] = newId;
@@ -232,7 +234,7 @@ contract RoleManager is ReentrancyGuard {
         emit ApplicationApproved(applicationId, app.applicant, app.requestedRole, msg.sender);
     }
 
-    function rejectApplication(uint256 applicationId) external onlyAdmin {
+    function rejectApplication(uint256 applicationId, string calldata reason) external onlyAdmin {
         Application storage app = applications[applicationId];
         require(app.applicationId != 0, "Application does not exist");
         require(app.status == ApplicationStatus.PENDING, "Not pending");
@@ -248,6 +250,7 @@ contract RoleManager is ReentrancyGuard {
         app.status = ApplicationStatus.REJECTED;
         app.respondedAt = block.timestamp;
         app.respondedBy = msg.sender;
+        app.rejectionReason = reason;
 
         emit ApplicationRejected(applicationId, app.applicant, msg.sender);
     }

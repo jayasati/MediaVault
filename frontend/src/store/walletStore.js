@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { BrowserProvider } from "ethers";
 import toast from "react-hot-toast";
 import { CHAIN_ID, NETWORK_NAME } from "@/constants/contracts";
+import { clearWalletCache } from "@/utils/storage";
 
 const SEPOLIA_CHAIN_ID_HEX = `0x${CHAIN_ID.toString(16)}`;
 
@@ -30,6 +31,11 @@ const useWalletStore = create(
         if (window.ethereum) {
           window.ethereum.removeAllListeners("accountsChanged");
           window.ethereum.removeAllListeners("chainChanged");
+        }
+        // Clear cached dashboard data for this wallet before clearing wallet state
+        const currentAddr = get().address;
+        if (currentAddr) {
+          clearWalletCache(currentAddr);
         }
         set({
           address: null,

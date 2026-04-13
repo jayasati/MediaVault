@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Github,
   Clock,
+  AlertTriangle,
 } from "lucide-react";
 
 /* ───────── role config ───────── */
@@ -131,7 +132,11 @@ export default function Landing() {
     if (!walletAddress || !roleManager) return;
     if (!silent) setChecking(true);
     try {
-      const role = Number(await roleManager.getRole(walletAddress));
+      const rolePromise = roleManager.getRole(walletAddress);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Role check timed out")), 5000)
+      );
+      const role = Number(await Promise.race([rolePromise, timeoutPromise]));
 
       // Always read latest application for diagnostics
       let appInfo = null;
@@ -143,6 +148,8 @@ export default function Landing() {
             status: Number(app.status), // 0=PENDING, 1=APPROVED, 2=REJECTED
             requestedRole: Number(app.requestedRole),
             name: app.name,
+            rejectionReason: app.rejectionReason || "",
+            respondedAt: Number(app.respondedAt),
           };
         }
       } catch {}
@@ -599,6 +606,31 @@ export default function Landing() {
                   <div className="text-xs text-amber-400/70">
                     Your {pendingApp.role} application (ID #{pendingApp.id}) is awaiting admin approval.
                     Share this ID with the admin who needs to approve it.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Rejection notice */}
+            {diagnostics?.application?.status === 2 && (
+              <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-red-300">Application rejected</div>
+                    <div className="text-xs text-red-400/70 mt-1">
+                      Application #{diagnostics.application.id}
+                      {diagnostics.application.respondedAt ? ` on ${new Date(diagnostics.application.respondedAt * 1000).toLocaleDateString()}` : ""}
+                    </div>
+                    {diagnostics.application.rejectionReason && (
+                      <div className="mt-2 rounded-md bg-black/20 px-3 py-2 text-xs text-slate-300">
+                        <span className="font-medium text-slate-400">Reason: </span>
+                        {diagnostics.application.rejectionReason}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-red-400/60 mt-2">
+                      You can re-apply 7 days after rejection (cooldown period).
+                    </div>
                   </div>
                 </div>
               </div>

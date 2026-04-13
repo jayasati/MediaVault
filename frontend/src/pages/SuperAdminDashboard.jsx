@@ -12,7 +12,7 @@ function shortenAddr(a) {
 
 export default function SuperAdminDashboard() {
   const { walletAddress, isConnected, disconnect } = useWallet();
-  const { verified, checking } = useRoleGuard("super_admin");
+  const { verified, checking, timedOut, retry } = useRoleGuard("super_admin");
   const roleManager = useContract("RoleManager");
 
   const [addAddr, setAddAddr] = useState("");
@@ -100,6 +100,21 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  if (timedOut) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f8fafc] gap-4 p-8">
+        <AlertTriangle className="h-10 w-10 text-[#854F0B]" />
+        <div className="text-center">
+          <div className="text-sm font-medium mb-1">Role check timed out</div>
+          <div className="text-xs text-[#64748b] max-w-md">The contract didn't respond within 5 seconds.</div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={retry} className="px-4 py-2 bg-[#0D9488] text-white text-xs font-medium rounded-[7px]">Retry</button>
+          <button onClick={disconnect} className="px-4 py-2 border border-[#cbd5e1] text-xs rounded-[7px]">Disconnect</button>
+        </div>
+      </div>
+    );
+  }
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] gap-3 text-[13px] text-[#64748b]">

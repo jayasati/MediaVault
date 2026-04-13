@@ -147,14 +147,20 @@ describe("RoleManager", function () {
 
     it("should reject cross-hospital rejection", async function () {
       await expect(
-        roleManager.connect(adminOther).rejectApplication(1)
+        roleManager.connect(adminOther).rejectApplication(1, "test reason")
       ).to.be.revertedWith("Different hospital - cannot reject");
     });
 
     it("should allow same-hospital admin to reject", async function () {
-      await roleManager.connect(admin1).rejectApplication(1);
+      await roleManager.connect(admin1).rejectApplication(1, "test reason");
       const app = await roleManager.getApplication(1);
       expect(app.status).to.equal(Status.REJECTED);
+    });
+
+    it("should store rejection reason on rejected application", async function () {
+      await roleManager.connect(admin1).rejectApplication(1, "License number invalid - please resubmit with MCI verification");
+      const app = await roleManager.getApplication(1);
+      expect(app.rejectionReason).to.equal("License number invalid - please resubmit with MCI verification");
     });
 
     it("should inherit hospitalId on approval", async function () {
@@ -171,7 +177,7 @@ describe("RoleManager", function () {
 
     it("should reject re-application within cooldown period", async function () {
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI");
-      await roleManager.connect(admin1).rejectApplication(1);
+      await roleManager.connect(admin1).rejectApplication(1, "test reason");
 
       // Immediately try again
       await expect(
@@ -181,7 +187,7 @@ describe("RoleManager", function () {
 
     it("should reject re-application after 6 days", async function () {
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI");
-      await roleManager.connect(admin1).rejectApplication(1);
+      await roleManager.connect(admin1).rejectApplication(1, "test reason");
       await time.increase(6 * DAY);
 
       await expect(
@@ -191,7 +197,7 @@ describe("RoleManager", function () {
 
     it("should allow re-application after cooldown expires", async function () {
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI");
-      await roleManager.connect(admin1).rejectApplication(1);
+      await roleManager.connect(admin1).rejectApplication(1, "test reason");
       await time.increase(COOLDOWN + 1);
 
       await roleManager.connect(doctor).applyForRole(Role.DOCTOR, APOLLO, "Dr.", "Card", "MCI2");
