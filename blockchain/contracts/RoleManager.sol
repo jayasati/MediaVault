@@ -49,13 +49,47 @@ contract RoleManager is ReentrancyGuard {
         string rejectionReason;
     }
 
+    struct Hospital {
+        bytes32 hospitalId;
+        string name;
+        string city;
+        string stateName;
+        string registrationNumber;
+        string documentsIPFS;
+        address currentAdmin;
+        bool active;
+        uint256 approvedAt;
+    }
+
+    struct HospitalApplication {
+        uint256 applicationId;
+        address applicant;
+        bytes32 hospitalId;
+        string name;
+        string city;
+        string stateName;
+        string registrationNumber;
+        string documentsIPFS;
+        ApplicationStatus status;
+        uint256 appliedAt;
+        uint256 respondedAt;
+        string rejectionReason;
+    }
+
     address public superAdmin;
     uint256 private _applicationIdCounter;
+    uint256 private _hospitalApplicationIdCounter;
 
     mapping(address => UserRole) private users;
     mapping(uint256 => Application) private applications;
     mapping(address => uint256) private latestApplication;
     uint256[] private allApplicationIds;
+
+    mapping(bytes32 => Hospital) private hospitals;
+    bytes32[] private hospitalIdList;
+    mapping(uint256 => HospitalApplication) private hospitalApplications;
+    mapping(address => uint256) private latestHospitalApplication;
+    uint256[] private allHospitalApplicationIds;
 
     event PatientRegistered(address indexed wallet);
     event AdminAdded(address indexed wallet, bytes32 indexed hospitalId, address indexed addedBy);
@@ -64,6 +98,9 @@ contract RoleManager is ReentrancyGuard {
     event ApplicationApproved(uint256 indexed applicationId, address indexed applicant, Role role, address indexed approvedBy);
     event ApplicationRejected(uint256 indexed applicationId, address indexed applicant, address indexed rejectedBy);
     event RoleRevoked(address indexed wallet, Role previousRole, address indexed revokedBy);
+    event HospitalApplied(uint256 indexed applicationId, address indexed applicant, bytes32 indexed hospitalId);
+    event HospitalApproved(uint256 indexed applicationId, bytes32 indexed hospitalId, address indexed admin);
+    event HospitalRejected(uint256 indexed applicationId, address indexed applicant, string reason);
 
     modifier onlySuperAdmin() {
         require(msg.sender == superAdmin, "Only super admin");
@@ -127,10 +164,174 @@ contract RoleManager is ReentrancyGuard {
 
     function removeAdmin(address wallet) external onlySuperAdmin {
         require(users[wallet].role == Role.ADMIN, "Not an admin");
+        bytes32 prevHospital = users[wallet].hospitalId;
         users[wallet].role = Role.NONE;
         users[wallet].isActive = false;
         users[wallet].hospitalId = bytes32(0);
+        if (prevHospital != bytes32(0) && hospitals[prevHospital].currentAdmin == wallet) {
+            hospitals[prevHospital].currentAdmin = address(0);
+            hospitals[prevHospital].active = false;
+        }
         emit AdminRemoved(wallet, msg.sender);
+    }
+
+    // ── Hospital: apply then super admin approves (onboards a new hospital + its admin) ──
+
+    function applyForHospital(
+        string calldata name,
+        string calldata city,
+        string calldata stateName,
+        string calldata registrationNumber,
+        string calldata documentsIPFS
+    ) external {
+        require(
+            users[msg.sender].role == Role.NONE || users[msg.sender].role == Role.PATIENT,
+            "Already has a privileged role"
+        );
+        require(bytes(name).length > 0, "Name required");
+        require(bytes(city).length > 0, "City required");
+        require(bytes(stateName).length > 0, "State required");
+        require(bytes(registrationNumber).length > 0, "Registration number required");
+        require(bytes(documentsIPFS).length > 0, "Documents IPFS CID required");
+
+        bytes32 hospitalId = keccak256(abi.encodePacked(registrationNumber));
+        require(!hospitals[hospitalId].active, "Hospital already registered");
+
+        uint256 existingId = latestHospitalApplication[msg.sender];
+        if (existingId != 0) {
+            HospitalApplication storage prev = hospitalApplications[existingId];
+            if (prev.status == ApplicationStatus.PENDING) {
+                require(
+                    block.timestamp > prev.appliedAt + APPLICATION_TTL,
+                    "Pending hospital application exists"
+                );
+            } else if (prev.status == ApplicationStatus.REJECTED) {
+                require(
+                    block.timestamp >= prev.respondedAt + APPLICATION_COOLDOWN,
+                    "Cooldown active - try again later"
+                );
+            }
+        }
+
+        _hospitalApplicationIdCounter++;
+        uint256 newId = _hospitalApplicationIdCounter;
+
+        hospitalApplications[newId] = HospitalApplication({
+            applicationId: newId,
+            applicant: msg.sender,
+            hospitalId: hospitalId,
+            name: name,
+            city: city,
+            stateName: stateName,
+            registrationNumber: registrationNumber,
+            documentsIPFS: documentsIPFS,
+            status: ApplicationStatus.PENDING,
+            appliedAt: block.timestamp,
+            respondedAt: 0,
+            rejectionReason: ""
+        });
+
+        latestHospitalApplication[msg.sender] = newId;
+        allHospitalApplicationIds.push(newId);
+
+        emit HospitalApplied(newId, msg.sender, hospitalId);
+    }
+
+    function approveHospital(uint256 applicationId) external onlySuperAdmin {
+        HospitalApplication storage app = hospitalApplications[applicationId];
+        require(app.applicationId != 0, "Application does not exist");
+        require(app.status == ApplicationStatus.PENDING, "Not pending");
+        require(block.timestamp <= app.appliedAt + APPLICATION_TTL, "Application expired");
+        require(!hospitals[app.hospitalId].active, "Hospital already registered");
+        require(
+            users[app.applicant].role == Role.NONE || users[app.applicant].role == Role.PATIENT,
+            "Applicant already has a privileged role"
+        );
+
+        app.status = ApplicationStatus.APPROVED;
+        app.respondedAt = block.timestamp;
+
+        hospitals[app.hospitalId] = Hospital({
+            hospitalId: app.hospitalId,
+            name: app.name,
+            city: app.city,
+            stateName: app.stateName,
+            registrationNumber: app.registrationNumber,
+            documentsIPFS: app.documentsIPFS,
+            currentAdmin: app.applicant,
+            active: true,
+            approvedAt: block.timestamp
+        });
+        hospitalIdList.push(app.hospitalId);
+
+        users[app.applicant] = UserRole({
+            wallet: app.applicant,
+            role: Role.ADMIN,
+            isActive: true,
+            registeredAt: block.timestamp,
+            approvedBy: msg.sender,
+            hospitalId: app.hospitalId
+        });
+
+        emit HospitalApproved(applicationId, app.hospitalId, app.applicant);
+        emit AdminAdded(app.applicant, app.hospitalId, msg.sender);
+    }
+
+    function rejectHospital(uint256 applicationId, string calldata reason) external onlySuperAdmin {
+        HospitalApplication storage app = hospitalApplications[applicationId];
+        require(app.applicationId != 0, "Application does not exist");
+        require(app.status == ApplicationStatus.PENDING, "Not pending");
+
+        app.status = ApplicationStatus.REJECTED;
+        app.respondedAt = block.timestamp;
+        app.rejectionReason = reason;
+
+        emit HospitalRejected(applicationId, app.applicant, reason);
+    }
+
+    function getHospital(bytes32 hospitalId) external view returns (Hospital memory) {
+        return hospitals[hospitalId];
+    }
+
+    function getAllHospitals() external view returns (Hospital[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < hospitalIdList.length; i++) {
+            if (hospitals[hospitalIdList[i]].active) count++;
+        }
+        Hospital[] memory result = new Hospital[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < hospitalIdList.length; i++) {
+            Hospital storage h = hospitals[hospitalIdList[i]];
+            if (h.active) {
+                result[idx] = h;
+                idx++;
+            }
+        }
+        return result;
+    }
+
+    function getPendingHospitalApplications() external view returns (uint256[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < allHospitalApplicationIds.length; i++) {
+            HospitalApplication storage app = hospitalApplications[allHospitalApplicationIds[i]];
+            if (app.status == ApplicationStatus.PENDING && block.timestamp <= app.appliedAt + APPLICATION_TTL) {
+                count++;
+            }
+        }
+        uint256[] memory result = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < allHospitalApplicationIds.length; i++) {
+            HospitalApplication storage app = hospitalApplications[allHospitalApplicationIds[i]];
+            if (app.status == ApplicationStatus.PENDING && block.timestamp <= app.appliedAt + APPLICATION_TTL) {
+                result[idx] = allHospitalApplicationIds[i];
+                idx++;
+            }
+        }
+        return result;
+    }
+
+    function getHospitalApplication(uint256 applicationId) external view returns (HospitalApplication memory) {
+        return hospitalApplications[applicationId];
     }
 
     // ── Doctor / Researcher: apply then admin approves ──
