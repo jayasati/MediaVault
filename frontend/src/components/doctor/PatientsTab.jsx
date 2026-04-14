@@ -15,6 +15,7 @@ export default function PatientsTab() {
   const accessControl = useContract("MediAccessControl");
   const registry = useContract("PatientRegistry");
   const rxManager = useContract("PrescriptionManager");
+  const appointments = useContract("AppointmentSystem");
 
   const [patients, setPatients] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -30,33 +31,67 @@ export default function PatientsTab() {
   const [rxGasEst, setRxGasEst] = useState("");
   const [writing, setWriting] = useState(false);
 
-  // Load patients with active access
+  // Load active patients — union of (a) approved access grants and
+  // (b) patients with CONFIRMED or COMPLETED appointments with this doctor.
   const loadPatients = useCallback(async () => {
     if (!accessControl || !walletAddress) return;
     setLoading(true);
     try {
-      const myRequests = await accessControl.getMyAccessRequests();
-      const activePatients = [];
-      for (const reqId of myRequests) {
-        const req = await accessControl.getAccessRequest(reqId);
-        if (Number(req.status) === 1 && Number(req.expiresAt) > Date.now() / 1000) {
-          // Avoid duplicates
-          if (!activePatients.find((p) => p.patientAddress.toLowerCase() === req.patientAddress.toLowerCase())) {
-            activePatients.push({
-              patientAddress: req.patientAddress,
-              requestId: req.requestId,
-              expiresAt: Number(req.expiresAt),
-            });
+      const byAddress = new Map(); // lowercased addr -> patient row
+
+      // (a) Access grants (explicit record-sharing)
+      try {
+        const myRequests = await accessControl.getMyAccessRequests();
+        for (const reqId of myRequests) {
+          const req = await accessControl.getAccessRequest(reqId);
+          if (Number(req.status) === 1 && Number(req.expiresAt) > Date.now() / 1000) {
+            const key = req.patientAddress.toLowerCase();
+            if (!byAddress.has(key)) {
+              byAddress.set(key, {
+                patientAddress: req.patientAddress,
+                requestId: req.requestId,
+                expiresAt: Number(req.expiresAt),
+                source: "access",
+              });
+            }
           }
         }
+      } catch (e) {
+        console.warn("Access grant load failed:", e);
       }
-      setPatients(activePatients);
+
+      // (b) Patients from confirmed/completed appointments
+      if (appointments) {
+        try {
+          const ids = await appointments.getDoctorAppointments(walletAddress);
+          for (const id of ids) {
+            const apt = await appointments.getAppointment(id);
+            const status = Number(apt.status);
+            // 1 = CONFIRMED, 3 = COMPLETED
+            if (status !== 1 && status !== 3) continue;
+            const key = apt.patient.toLowerCase();
+            if (byAddress.has(key)) continue;
+            byAddress.set(key, {
+              patientAddress: apt.patient,
+              requestId: 0,
+              expiresAt: 0,
+              source: "appointment",
+              lastAppointmentAt: Number(apt.scheduledFor),
+              appointmentStatus: status,
+            });
+          }
+        } catch (e) {
+          console.warn("Appointment-derived patient load failed:", e);
+        }
+      }
+
+      setPatients(Array.from(byAddress.values()));
     } catch (err) {
       console.error("Failed to load patients:", err);
     } finally {
       setLoading(false);
     }
-  }, [accessControl, walletAddress]);
+  }, [accessControl, appointments, walletAddress]);
 
   useEffect(() => {
     loadPatients();
@@ -206,7 +241,7 @@ export default function PatientsTab() {
           )}
           {!loading && patients.length === 0 && (
             <div className="text-[13px] text-[#94a3b8] py-6 text-center">
-              No active patients. Request access first.
+              No active patients yet. They'll appear here after an appointment or granted access.
             </div>
           )}
           <div className="flex flex-col gap-1">
@@ -226,7 +261,13 @@ export default function PatientsTab() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium truncate"><UserName address={p.patientAddress} showAddress={false} /></div>
-                    <div className="text-[10px] text-[#94a3b8]">{daysLeft(p.expiresAt)}</div>
+                    <div className="text-[10px] text-[#94a3b8]">
+                      {p.source === "access"
+                        ? daysLeft(p.expiresAt)
+                        : p.appointmentStatus === 3
+                        ? "Past appointment"
+                        : "Upcoming appointment"}
+                    </div>
                   </div>
                 </button>
               );

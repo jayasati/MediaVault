@@ -314,7 +314,7 @@ export default function Landing() {
     try {
       // 1. Register role on RoleManager — tolerate "already registered"
       try {
-        const tx1 = await roleManager.registerAsPatient();
+        const tx1 = await roleManager.registerAsPatient(patientName.trim());
         await tx1.wait();
       } catch (e) {
         if (isAlreadyRegistered(e)) {
