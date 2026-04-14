@@ -214,7 +214,7 @@ describe("RoleManager — Hospital Registry", function () {
       // Bootstrap: create hospital + admin, then apply doctor
       await apply(applicant, APOLLO);
       await roleManager.connect(superAdmin).approveHospital(1);
-      await roleManager.connect(doctor).applyForRole(Role.DOCTOR, apolloId, "Dr. Smith", "Cardiology", "MCI-12345");
+      await roleManager.connect(doctor).applyForRole(Role.DOCTOR, apolloId, "Dr. Smith", "Cardiology", "MCI-12345", "QmProfile");
       await roleManager.connect(applicant).approveApplication(1);
       expect(await roleManager.getRole(doctor.address)).to.equal(Role.DOCTOR);
 

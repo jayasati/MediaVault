@@ -6,7 +6,8 @@ describe("ClinicalRecordManager", function () {
   let registry, accessControl, roleManager, crm;
   let superAdmin, admin1, doctor1, doctor2, patient, stranger;
 
-  const APOLLO = ethers.keccak256(ethers.toUtf8Bytes("apollo-bangalore"));
+  const APOLLO_REG = "NABH-TN-0001";
+  const APOLLO = ethers.keccak256(ethers.solidityPacked(["string"], [APOLLO_REG]));
   const DAY = 86400;
   const CATEGORY = { LAB: 0, SCAN: 1, DIAGNOSIS: 2, PRESCRIPTION: 3, PROCEDURE: 4, DISCHARGE: 5, VITALS: 6, IMPORT: 7, OTHER: 8 };
   const STATUS = { PENDING_RATIFICATION: 0, CLINICAL: 1, AMENDED: 2, REJECTED_RATIFICATION: 3 };
@@ -18,7 +19,7 @@ describe("ClinicalRecordManager", function () {
     // Approve doctor1 via RoleManager
     await roleManager
       .connect(doctor1)
-      .applyForRole(2, APOLLO, "Dr. Smith", "Cardiology", "MCI-1234");
+      .applyForRole(2, APOLLO, "Dr. Smith", "Cardiology", "MCI-1234", "QmProfile");
     await roleManager.connect(admin1).approveApplication(1);
     // Doctor1 requests and patient approves access
     await accessControl.connect(doctor1).requestAccess(patient.address, "Checkup");
@@ -44,7 +45,11 @@ describe("ClinicalRecordManager", function () {
       await roleManager.getAddress()
     );
 
-    await roleManager.addAdmin(admin1.address, APOLLO, "Hospital Admin");
+    // Bootstrap hospital via the registry flow (atomically grants admin1 the ADMIN role).
+    await roleManager.connect(admin1).applyForHospital(
+      "Apollo Chennai", "Chennai", "Tamil Nadu", APOLLO_REG, "QmHospitalDocs", "Hospital Admin"
+    );
+    await roleManager.connect(superAdmin).approveHospital(1);
   });
 
   describe("Direct Record Upload", function () {
@@ -92,7 +97,7 @@ describe("ClinicalRecordManager", function () {
       // Register doctor2 but don't grant access
       await roleManager
         .connect(doctor2)
-        .applyForRole(2, APOLLO, "Dr. Jones", "Neurology", "MCI-5678");
+        .applyForRole(2, APOLLO, "Dr. Jones", "Neurology", "MCI-5678", "QmProfile");
       await roleManager.connect(admin1).approveApplication(2);
 
       await expect(
@@ -240,7 +245,7 @@ describe("ClinicalRecordManager", function () {
     it("should reject ratification by wrong doctor", async function () {
       await roleManager
         .connect(doctor2)
-        .applyForRole(2, APOLLO, "Dr. Jones", "Cardiology", "MCI-22");
+        .applyForRole(2, APOLLO, "Dr. Jones", "Cardiology", "MCI-22", "QmProfile");
       await roleManager.connect(admin1).approveApplication(2);
 
       await crm
@@ -329,7 +334,7 @@ describe("ClinicalRecordManager", function () {
     it("should reject amendment by non-uploader", async function () {
       await roleManager
         .connect(doctor2)
-        .applyForRole(2, APOLLO, "Dr. Jones", "Cardiology", "MCI-22");
+        .applyForRole(2, APOLLO, "Dr. Jones", "Cardiology", "MCI-22", "QmProfile");
       await roleManager.connect(admin1).approveApplication(2);
       await expect(
         crm.connect(doctor2).amendRecord(recordId, ethers.ZeroHash, "QmNew", "Steal")

@@ -1,8 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
-import { UserPlus, ShieldCheck, XCircle, ExternalLink, Clock } from "lucide-react";
+import { UserPlus, ShieldCheck, XCircle, ExternalLink, Clock, RefreshCw, X, FileText, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+
+const IPFS_GATEWAY = import.meta.env.VITE_PINATA_GATEWAY || "https://gateway.pinata.cloud/ipfs/";
+function ipfsUrl(cid) {
+  if (!cid) return "#";
+  const cleaned = cid.replace(/^ipfs:\/\//, "").replace(/^\/ipfs\//, "");
+  const base = IPFS_GATEWAY.endsWith("/") ? IPFS_GATEWAY : `${IPFS_GATEWAY}/`;
+  return `${base}${cleaned}`;
+}
 
 const ROLE_LABELS = { 2: "Doctor", 3: "Researcher" };
 const STATUS_LABELS = { 0: "Pending", 1: "Approved", 2: "Rejected" };
@@ -19,6 +27,7 @@ export default function DoctorsTab() {
   const [approvedList, setApprovedList] = useState([]);
   const [adminHospital, setAdminHospital] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [profileModal, setProfileModal] = useState(null); // { app, data, loading, error, previewDoc }
 
   const loadApplications = useCallback(async () => {
     if (!roleManager || !walletAddress) return;
@@ -45,11 +54,13 @@ export default function DoctorsTab() {
           requestedRole: Number(app.requestedRole),
           name: app.name,
           specialization: app.specialization,
-          credentials: app.credentials,
+          licenseNumber: app.licenseNumber,
+          profileIPFS: app.profileIPFS,
           hospitalId: app.hospitalId,
           appliedAt: Number(app.appliedAt),
         });
       }
+      console.log(`[DoctorsTab] hospitalId=${myHospital} pendingIds=${pendingIds.length} loaded=${pending.length}`);
       setPendingApps(pending);
 
       // Approved doctors/researchers — filter by same hospital (unless super admin)
@@ -90,7 +101,7 @@ export default function DoctorsTab() {
     } finally {
       setLoading(false);
     }
-  }, [roleManager]);
+  }, [roleManager, walletAddress]);
 
   useEffect(() => {
     loadApplications();
@@ -128,6 +139,18 @@ export default function DoctorsTab() {
       loadApplications();
     } catch (err) {
       toast.error(err.reason || "Failed to reject", { id: tid });
+    }
+  };
+
+  const openProfile = async (app) => {
+    setProfileModal({ app, data: null, loading: true, error: null, previewDoc: null });
+    try {
+      const res = await fetch(ipfsUrl(app.profileIPFS));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setProfileModal({ app, data, loading: false, error: null, previewDoc: null });
+    } catch (err) {
+      setProfileModal({ app, data: null, loading: false, error: err.message || "Failed to load", previewDoc: null });
     }
   };
 
@@ -172,8 +195,17 @@ export default function DoctorsTab() {
 
       {/* Pending applications */}
       <div className="bg-white border border-[#e2e8f0] rounded-xl p-5 mb-4">
-        <div className="text-xs font-medium text-[#64748b] mb-3">
-          Pending applications — {pendingApps.length}
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xs font-medium text-[#64748b]">
+            Pending applications — {pendingApps.length}
+          </div>
+          <button
+            onClick={loadApplications}
+            className="text-[11px] text-[#0D9488] hover:text-[#0B7C72] inline-flex items-center gap-1"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Refresh
+          </button>
         </div>
 
         {pendingApps.length === 0 && (
@@ -197,12 +229,24 @@ export default function DoctorsTab() {
                 </div>
                 <div className="text-[10px] text-[#64748b]">
                   {app.specialization && `${app.specialization} · `}
-                  {shortenAddr(app.applicant)} · Cred: {app.credentials}
+                  {shortenAddr(app.applicant)}
+                  {app.licenseNumber && ` · License: ${app.licenseNumber}`}
                 </div>
                 <div className="text-[10px] text-[#94a3b8]">
                   Applied {new Date(app.appliedAt * 1000).toLocaleDateString("en-IN", {
                     day: "numeric", month: "short", year: "numeric",
                   })}
+                  {app.profileIPFS && (
+                    <>
+                      {" · "}
+                      <button
+                        onClick={() => openProfile(app)}
+                        className="text-[#0D9488] hover:underline inline-flex items-center gap-0.5"
+                      >
+                        View profile <Eye className="h-[9px] w-[9px]" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               <button
@@ -265,6 +309,227 @@ export default function DoctorsTab() {
           </div>
         ))}
       </div>
+
+      {profileModal && (
+        <ProfileModal
+          state={profileModal}
+          onClose={() => setProfileModal(null)}
+          onPreview={(key, cid) => setProfileModal((s) => ({ ...s, previewDoc: { key, cid } }))}
+          onClosePreview={() => setProfileModal((s) => ({ ...s, previewDoc: null }))}
+          onApprove={() => {
+            const id = profileModal.app.applicationId;
+            setProfileModal(null);
+            handleApprove(id);
+          }}
+          onReject={() => {
+            const id = profileModal.app.applicationId;
+            setProfileModal(null);
+            handleReject(id);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+const DOC_LABELS = {
+  nmcCertificate: "NMC Certificate",
+  degreeCertificate: "Degree Certificate",
+  appointmentLetter: "Appointment Letter",
+  governmentId: "Government ID",
+  credentialsPdf: "Credentials PDF",
+};
+
+function Field({ label, value, mono }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-[#94a3b8] font-medium">{label}</div>
+      <div className={`text-[12px] text-[#0f172a] mt-0.5 break-all ${mono ? "font-mono" : ""}`}>
+        {value || <span className="text-[#cbd5e1]">—</span>}
+      </div>
+    </div>
+  );
+}
+
+function ProfileModal({ state, onClose, onPreview, onClosePreview, onApprove, onReject }) {
+  const { app, data, loading, error, previewDoc } = state;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#e2e8f0]">
+          <div>
+            <div className="text-[13px] font-semibold text-[#0f172a]">
+              {app.requestedRole === 3 ? "Researcher" : "Doctor"} Application
+            </div>
+            <div className="text-[10px] text-[#64748b]">Review details and verify documents</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md hover:bg-[#f1f5f9] text-[#64748b]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {loading && (
+            <div className="flex items-center justify-center py-16 gap-3 text-[12px] text-[#64748b]">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0D9488] border-t-transparent" />
+              Fetching profile from IPFS...
+            </div>
+          )}
+
+          {error && (
+            <div className="text-[12px] text-[#791F1F] bg-[#FCEBEB] border border-[#f9d5d5] rounded-lg p-3">
+              Failed to load profile: {error}
+            </div>
+          )}
+
+          {data && !loading && (() => {
+            const isResearcher = data.role === "researcher" || app.requestedRole === 3;
+            const avatarBg = isResearcher ? "bg-[#EEEDFE]" : "bg-[#E6F1FB]";
+            const avatarText = isResearcher ? "text-[#3C3489]" : "text-[#0C447C]";
+            return (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3 pb-4 border-b border-[#e2e8f0]">
+                <div className={`w-12 h-12 ${avatarBg} rounded-full flex items-center justify-center text-[14px] font-semibold ${avatarText}`}>
+                  {(data.name || "?").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <div className="text-[15px] font-semibold text-[#0f172a]">{data.name}</div>
+                  <div className="text-[11px] text-[#64748b] capitalize">
+                    {data.role}
+                    {data.specialization ? ` · ${data.specialization}` : ""}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {!isResearcher && <Field label="License Number" value={data.licenseNumber} />}
+                {!isResearcher && data.specialization && (
+                  <Field label="Specialization" value={data.specialization} />
+                )}
+                <Field label="Qualifications" value={data.qualifications} />
+                {!isResearcher && (
+                  <Field
+                    label="Years of Experience"
+                    value={data.yearsOfExperience != null ? String(data.yearsOfExperience) : ""}
+                  />
+                )}
+                <Field
+                  label="Submitted"
+                  value={data.submittedAt ? new Date(data.submittedAt).toLocaleString("en-IN") : ""}
+                />
+                <Field label="Wallet Address" value={data.wallet} mono />
+                <Field label="Hospital ID" value={data.hospitalId} mono />
+              </div>
+
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[#64748b] font-medium mb-2">
+                  Verification Documents
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(data.documents || {}).map(([key, cid]) => (
+                    <div
+                      key={key}
+                      className="flex items-center gap-2 p-[10px] bg-[#f8fafc] border border-[#e2e8f0] rounded-lg"
+                    >
+                      <FileText className="h-4 w-4 text-[#0D9488] flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-medium text-[#0f172a]">
+                          {DOC_LABELS[key] || key}
+                        </div>
+                        <div className="text-[9px] font-mono text-[#94a3b8] truncate">{cid}</div>
+                      </div>
+                      <button
+                        onClick={() => onPreview(key, cid)}
+                        className="text-[10px] text-[#0D9488] hover:text-[#0B7C72] font-medium inline-flex items-center gap-0.5"
+                      >
+                        <Eye className="h-3 w-3" /> View
+                      </button>
+                      <a
+                        href={ipfsUrl(cid)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-[#64748b] hover:text-[#0f172a] inline-flex items-center gap-0.5"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            );
+          })()}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-[#e2e8f0] bg-[#f8fafc]">
+          <div className="text-[10px] text-[#94a3b8]">
+            App #{app.applicationId} · {shortenAddr(app.applicant)}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onReject}
+              className="px-3 py-[6px] bg-[#FCEBEB] text-[#791F1F] text-[11px] font-medium rounded-[7px] hover:bg-[#f9d5d5]"
+            >
+              Reject
+            </button>
+            <button
+              onClick={onApprove}
+              className="px-4 py-[6px] bg-[#0D9488] text-white text-[11px] font-medium rounded-[7px] hover:bg-[#0B7C72]"
+            >
+              Approve
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {previewDoc && (
+        <div
+          className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4"
+          onClick={onClosePreview}
+        >
+          <div
+            className="bg-white rounded-xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2 border-b border-[#e2e8f0]">
+              <div className="text-[12px] font-medium text-[#0f172a]">
+                {DOC_LABELS[previewDoc.key] || previewDoc.key}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={ipfsUrl(previewDoc.cid)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-[#0D9488] hover:underline inline-flex items-center gap-0.5"
+                >
+                  Open in new tab <ExternalLink className="h-3 w-3" />
+                </a>
+                <button
+                  onClick={onClosePreview}
+                  className="p-1 rounded-md hover:bg-[#f1f5f9] text-[#64748b]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <iframe
+              src={ipfsUrl(previewDoc.cid)}
+              title={previewDoc.key}
+              className="flex-1 w-full bg-[#f8fafc]"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

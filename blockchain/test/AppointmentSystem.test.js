@@ -6,12 +6,13 @@ describe("AppointmentSystem", function () {
   let roleManager, appointments;
   let superAdmin, admin1, doctor1, doctor2, doctor3, patient, stranger;
 
-  const APOLLO = ethers.keccak256(ethers.toUtf8Bytes("apollo-bangalore"));
+  const APOLLO_REG = "NABH-TN-0001";
+  const APOLLO = ethers.keccak256(ethers.solidityPacked(["string"], [APOLLO_REG]));
   const DAY = 86400;
   const Status = { REQUESTED: 0, CONFIRMED: 1, REJECTED: 2, COMPLETED: 3, CANCELLED: 4 };
 
   async function registerDoctor(signer, name, spec, cred) {
-    await roleManager.connect(signer).applyForRole(2, APOLLO, name, spec, cred);
+    await roleManager.connect(signer).applyForRole(2, APOLLO, name, spec, cred, "QmProfile");
   }
 
   beforeEach(async function () {
@@ -23,7 +24,11 @@ describe("AppointmentSystem", function () {
     const AppointmentSystem = await ethers.getContractFactory("AppointmentSystem");
     appointments = await AppointmentSystem.deploy(await roleManager.getAddress());
 
-    await roleManager.addAdmin(admin1.address, APOLLO, "Hospital Admin");
+    // Bootstrap hospital via the registry flow (atomically grants admin1 the ADMIN role).
+    await roleManager.connect(admin1).applyForHospital(
+      "Apollo Chennai", "Chennai", "Tamil Nadu", APOLLO_REG, "QmHospitalDocs", "Hospital Admin"
+    );
+    await roleManager.connect(superAdmin).approveHospital(1);
     await roleManager.connect(patient).registerAsPatient("Test Patient");
   });
 

@@ -45,7 +45,8 @@ contract RoleManager is ReentrancyGuard {
         bytes32 hospitalId;
         string name;
         string specialization;
-        string credentials;
+        string licenseNumber;
+        string profileIPFS;
         ApplicationStatus status;
         uint256 appliedAt;
         uint256 respondedAt;
@@ -369,19 +370,24 @@ contract RoleManager is ReentrancyGuard {
         bytes32 hospitalId,
         string calldata name,
         string calldata specialization,
-        string calldata credentials
+        string calldata licenseNumber,
+        string calldata profileIPFS
     ) external {
         require(
             requestedRole == Role.DOCTOR || requestedRole == Role.RESEARCHER,
             "Can only apply for Doctor or Researcher"
         );
         require(hospitalId != bytes32(0), "Hospital ID required");
+        require(hospitals[hospitalId].active, "Unknown hospital");
         require(
             users[msg.sender].role == Role.NONE || users[msg.sender].role == Role.PATIENT,
             "Already has a privileged role"
         );
         require(bytes(name).length > 0, "Name required");
-        require(bytes(credentials).length > 0, "Credentials required");
+        require(bytes(profileIPFS).length > 0, "Profile IPFS CID required");
+        if (requestedRole == Role.DOCTOR) {
+            require(bytes(licenseNumber).length > 0, "License number required");
+        }
 
         // Cooldown check on prior application
         uint256 existingId = latestApplication[msg.sender];
@@ -414,7 +420,8 @@ contract RoleManager is ReentrancyGuard {
             hospitalId: hospitalId,
             name: name,
             specialization: specialization,
-            credentials: credentials,
+            licenseNumber: licenseNumber,
+            profileIPFS: profileIPFS,
             status: ApplicationStatus.PENDING,
             appliedAt: block.timestamp,
             respondedAt: 0,
@@ -460,7 +467,7 @@ contract RoleManager is ReentrancyGuard {
             hospitalId: app.hospitalId,
             displayName: app.name,
             specialization: app.specialization,
-            profileIPFS: ""
+            profileIPFS: app.profileIPFS
         });
 
         emit ApplicationApproved(applicationId, app.applicant, app.requestedRole, msg.sender);

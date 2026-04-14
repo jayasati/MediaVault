@@ -70,6 +70,39 @@ export default function useIPFS() {
     }
   }, []);
 
+  // Upload a plain (unencrypted) file to Pinata → returns CID.
+  // For credential documents that must be readable by reviewers.
+  const uploadFilePlain = useCallback(async (file) => {
+    if (!PINATA_KEY || !PINATA_SECRET) {
+      toast.error("Pinata API keys not configured");
+      return null;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file, file.name);
+      formData.append("pinataMetadata", JSON.stringify({
+        name: `medivault-doc-${file.name}`,
+        keyvalues: { encrypted: "false", originalName: file.name },
+      }));
+      const res = await axios.post(`${PINATA_API}/pinning/pinFileToIPFS`, formData, {
+        maxBodyLength: Infinity,
+        headers: {
+          "Content-Type": "multipart/form-data",
+          pinata_api_key: PINATA_KEY,
+          pinata_secret_api_key: PINATA_SECRET,
+        },
+      });
+      return res.data.IpfsHash;
+    } catch (err) {
+      console.error("IPFS plain upload error:", err);
+      toast.error(`Failed to upload ${file.name}`);
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
   // Upload a JSON object to Pinata → returns CID
   const uploadJSON = useCallback(async (jsonObject) => {
     if (!PINATA_KEY || !PINATA_SECRET) {
@@ -138,5 +171,5 @@ export default function useIPFS() {
     }
   }, []);
 
-  return { uploadFile, uploadJSON, getFile, getJSON, uploading, downloading };
+  return { uploadFile, uploadFilePlain, uploadJSON, getFile, getJSON, uploading, downloading };
 }

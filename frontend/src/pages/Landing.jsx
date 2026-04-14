@@ -3,6 +3,7 @@ import { ethers } from "ethers";
 import { useNavigate } from "react-router-dom";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import useIPFS from "@/hooks/useIPFS";
 import { useWalletStore } from "@/store";
 import toast from "react-hot-toast";
 import {
@@ -102,12 +103,77 @@ const STATS = [
 const ROLE_ENUM = { NONE: 0, PATIENT: 1, DOCTOR: 2, RESEARCHER: 3, ADMIN: 4, SUPER_ADMIN: 5 };
 const ROLE_PATHS = { 1: "/patient", 2: "/doctor", 3: "/researcher", 4: "/admin", 5: "/super-admin" };
 
+/* ───────── small helpers ───────── */
+const ALLOWED_DOC_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+const MAX_DOC_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function FileField({ label, file, onChange }) {
+  const [error, setError] = useState("");
+  const handle = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) { onChange(null); setError(""); return; }
+    if (!ALLOWED_DOC_TYPES.includes(f.type)) {
+      setError("Only PDF, JPG, or PNG");
+      onChange(null);
+      return;
+    }
+    if (f.size > MAX_DOC_BYTES) {
+      setError("File must be under 5 MB");
+      onChange(null);
+      return;
+    }
+    setError("");
+    onChange(f);
+  };
+  return (
+    <div>
+      <label className="text-[11px] text-slate-400 block mb-1">{label}</label>
+      <input
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png"
+        onChange={handle}
+        className="block w-full text-[11px] text-slate-300 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[11px] file:bg-teal-500/20 file:text-teal-300 hover:file:bg-teal-500/30 file:cursor-pointer"
+      />
+      {file && !error && (
+        <div className="text-[10px] text-emerald-400 mt-0.5">✓ {file.name} ({(file.size / 1024).toFixed(0)} KB)</div>
+      )}
+      {error && <div className="text-[10px] text-red-400 mt-0.5">{error}</div>}
+    </div>
+  );
+}
+
+function RejectionReason({ reason }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = reason.length > 140 || reason.includes("\n");
+  return (
+    <div className="mt-2 rounded-md bg-black/20 px-3 py-2 text-xs text-slate-300">
+      <div className="font-medium text-slate-400 mb-1">Reason:</div>
+      <div
+        className={`whitespace-pre-wrap break-words leading-relaxed ${
+          isLong && !expanded ? "line-clamp-3" : ""
+        }`}
+      >
+        {reason}
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-[10px] font-medium text-red-300 hover:text-red-200"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ───────── component ───────── */
 export default function Landing() {
   const { walletAddress, isConnected, connect } = useWallet();
   const setRole = useWalletStore((s) => s.setRole);
   const roleManager = useContract("RoleManager");
   const patientRegistry = useContract("PatientRegistry");
+  const { uploadFilePlain, uploadJSON, uploading } = useIPFS();
   const navigate = useNavigate();
 
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -118,11 +184,22 @@ export default function Landing() {
   const [pendingApp, setPendingApp] = useState(null); // existing pending application
   const [diagnostics, setDiagnostics] = useState(null); // on-chain debug info
 
-  // Apply form state
+  // Apply form state — doctor/researcher
   const [applyName, setApplyName] = useState("");
   const [applySpec, setApplySpec] = useState("");
-  const [applyCred, setApplyCred] = useState("");
-  const [applyHospital, setApplyHospital] = useState("");
+  const [applyLicense, setApplyLicense] = useState("");
+  const [applyQualifications, setApplyQualifications] = useState("");
+  const [applyExperience, setApplyExperience] = useState("");
+  const [applyHospitalId, setApplyHospitalId] = useState(""); // bytes32 from dropdown
+  const [hospitals, setHospitals] = useState([]); // [{ hospitalId, name, city, stateName }]
+  // Doctor file uploads
+  const [docNmcCert, setDocNmcCert] = useState(null);
+  const [docDegreeCert, setDocDegreeCert] = useState(null);
+  const [docAppointmentLetter, setDocAppointmentLetter] = useState(null);
+  const [docGovIdDoctor, setDocGovIdDoctor] = useState(null);
+  // Researcher file uploads
+  const [resCredentialsPdf, setResCredentialsPdf] = useState(null);
+  const [resGovId, setResGovId] = useState(null);
 
   // Patient registration modal
   const [showPatientModal, setShowPatientModal] = useState(false);
@@ -287,34 +364,133 @@ export default function Landing() {
     }
   };
 
-  // Handle doctor/researcher application
+  // Load registered hospitals — for the dropdown in the apply modal
+  const loadHospitals = useCallback(async () => {
+    if (!roleManager) return;
+    try {
+      const list = await roleManager.getAllHospitals();
+      setHospitals(
+        list.map((h) => ({
+          hospitalId: h.hospitalId,
+          name: h.name,
+          city: h.city,
+          stateName: h.stateName,
+        }))
+      );
+    } catch (err) {
+      console.error("Failed to load hospitals:", err);
+    }
+  }, [roleManager]);
+
+  const resetApplyForm = () => {
+    setApplyName(""); setApplySpec(""); setApplyLicense("");
+    setApplyQualifications(""); setApplyExperience(""); setApplyHospitalId("");
+    setDocNmcCert(null); setDocDegreeCert(null);
+    setDocAppointmentLetter(null); setDocGovIdDoctor(null);
+    setResCredentialsPdf(null); setResGovId(null);
+  };
+
+  // Handle doctor/researcher application — upload docs to IPFS, pin profile JSON, then call applyForRole
   const handleApply = async () => {
-    if (!roleManager || !applyName || !applyCred || !applyHospital) {
-      toast.error("Fill all required fields including hospital");
+    if (!roleManager) return;
+    const isDoctor = applyRole === "doctor";
+
+    // Validate common fields
+    if (!applyName.trim() || !applyHospitalId) {
+      toast.error("Name and hospital are required");
       return;
     }
+    if (isDoctor) {
+      if (!applySpec.trim() || !applyLicense.trim() || !applyQualifications.trim() || !applyExperience.trim()) {
+        toast.error("All doctor fields are required");
+        return;
+      }
+      if (!docNmcCert || !docDegreeCert || !docAppointmentLetter || !docGovIdDoctor) {
+        toast.error("Upload all four mandatory documents");
+        return;
+      }
+    } else {
+      if (!applyQualifications.trim()) {
+        toast.error("Qualifications are required");
+        return;
+      }
+      if (!resCredentialsPdf || !resGovId) {
+        toast.error("Upload credentials PDF and govt ID");
+        return;
+      }
+    }
+
     setRegistering(true);
-    const tid = toast.loading("Submitting application...");
+    const tid = toast.loading("Uploading documents to IPFS...");
     try {
-      const roleEnum = applyRole === "doctor" ? ROLE_ENUM.DOCTOR : ROLE_ENUM.RESEARCHER;
-      // Hash hospital name to bytes32 — must match what super admin used when adding admin
-      const hospitalId = ethers.keccak256(ethers.toUtf8Bytes(applyHospital.trim().toLowerCase()));
-      const tx = await roleManager.applyForRole(roleEnum, hospitalId, applyName, applySpec, applyCred);
+      // 1. Upload each file to IPFS in parallel
+      let documentCIDs;
+      if (isDoctor) {
+        const [nmc, degree, appt, gov] = await Promise.all([
+          uploadFilePlain(docNmcCert),
+          uploadFilePlain(docDegreeCert),
+          uploadFilePlain(docAppointmentLetter),
+          uploadFilePlain(docGovIdDoctor),
+        ]);
+        if (!nmc || !degree || !appt || !gov) throw new Error("Document upload failed");
+        documentCIDs = {
+          nmcCertificate: nmc,
+          degreeCertificate: degree,
+          appointmentLetter: appt,
+          governmentId: gov,
+        };
+      } else {
+        const [cred, gov] = await Promise.all([
+          uploadFilePlain(resCredentialsPdf),
+          uploadFilePlain(resGovId),
+        ]);
+        if (!cred || !gov) throw new Error("Document upload failed");
+        documentCIDs = { credentialsPdf: cred, governmentId: gov };
+      }
+
+      // 2. Build profile JSON and pin it
+      toast.loading("Pinning profile to IPFS...", { id: tid });
+      const profile = {
+        version: 1,
+        role: isDoctor ? "doctor" : "researcher",
+        name: applyName.trim(),
+        specialization: applySpec.trim(),
+        licenseNumber: isDoctor ? applyLicense.trim() : "",
+        qualifications: applyQualifications.trim(),
+        yearsOfExperience: isDoctor ? Number(applyExperience) : null,
+        hospitalId: applyHospitalId,
+        wallet: walletAddress,
+        documents: documentCIDs,
+        submittedAt: new Date().toISOString(),
+      };
+      const profileCID = await uploadJSON(profile);
+      if (!profileCID) throw new Error("Profile pinning failed");
+
+      // 3. Submit on-chain
+      toast.loading("Submitting application on-chain...", { id: tid });
+      const roleEnum = isDoctor ? ROLE_ENUM.DOCTOR : ROLE_ENUM.RESEARCHER;
+      const tx = await roleManager.applyForRole(
+        roleEnum,
+        applyHospitalId,
+        applyName.trim(),
+        applySpec.trim(),
+        isDoctor ? applyLicense.trim() : "",
+        profileCID
+      );
       await tx.wait();
-      toast.success("Application submitted! Admin from " + applyHospital + " will review it.", { id: tid });
+
+      const hospitalLabel = hospitals.find((h) => h.hospitalId === applyHospitalId)?.name || "the hospital";
+      toast.success(`Application submitted! Admin at ${hospitalLabel} will review it.`, { id: tid });
       setShowApplyModal(false);
       setShowRoleModal(true);
-      setApplyName("");
-      setApplySpec("");
-      setApplyCred("");
-      setApplyHospital("");
-      // Refresh diagnostics so the user sees their new pending app
+      resetApplyForm();
       checkRole();
     } catch (err) {
+      console.error("Apply failed:", err);
       if (err.code === "ACTION_REJECTED") {
         toast.error("Transaction rejected", { id: tid });
       } else {
-        toast.error(err.reason || "Application failed", { id: tid });
+        toast.error(err.reason || err.shortMessage || err.message || "Application failed", { id: tid });
       }
     } finally {
       setRegistering(false);
@@ -325,6 +501,7 @@ export default function Landing() {
     setApplyRole(roleType);
     setShowRoleModal(false);
     setShowApplyModal(true);
+    loadHospitals();
   };
 
   const openHospitalModal = () => {
@@ -711,10 +888,7 @@ export default function Landing() {
                       {diagnostics.application.respondedAt ? ` on ${new Date(diagnostics.application.respondedAt * 1000).toLocaleDateString()}` : ""}
                     </div>
                     {diagnostics.application.rejectionReason && (
-                      <div className="mt-2 rounded-md bg-black/20 px-3 py-2 text-xs text-slate-300">
-                        <span className="font-medium text-slate-400">Reason: </span>
-                        {diagnostics.application.rejectionReason}
-                      </div>
+                      <RejectionReason reason={diagnostics.application.rejectionReason} />
                     )}
                     <div className="text-[10px] text-red-400/60 mt-2">
                       You can re-apply 7 days after rejection (cooldown period).
@@ -846,13 +1020,13 @@ export default function Landing() {
       {/* ── Apply Modal (Doctor / Researcher) ── */}
       {showApplyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151a20] p-8">
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#151a20] p-8 max-h-[90vh] overflow-y-auto">
             <div className="mb-6">
               <h2 className="text-xl font-bold">
                 Apply as {applyRole === "doctor" ? "Doctor" : "Researcher"}
               </h2>
               <p className="mt-1 text-sm text-slate-400">
-                Your application will be reviewed by a MediVault admin. This is recorded on-chain.
+                Your application — including documents — will be reviewed by a hospital admin. Profile metadata and document CIDs are stored on IPFS; only the CID is recorded on-chain.
               </p>
             </div>
 
@@ -863,70 +1037,124 @@ export default function Landing() {
                   type="text"
                   value={applyName}
                   onChange={(e) => setApplyName(e.target.value)}
-                  placeholder="Dr. Jane Smith"
+                  placeholder={applyRole === "doctor" ? "Ramesh Kumar" : "Anita Verma"}
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {applyRole === "doctor" && "Will be displayed as “Dr. <name>”. Don't add the Dr. prefix yourself."}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Hospital *</label>
+                <select
+                  value={applyHospitalId}
+                  onChange={(e) => setApplyHospitalId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-teal-500"
+                >
+                  <option value="">Select a registered hospital</option>
+                  {hospitals.map((h) => (
+                    <option key={h.hospitalId} value={h.hospitalId}>
+                      {h.name} · {h.stateName}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {hospitals.length === 0
+                    ? "No hospitals registered yet. Ask a hospital admin to onboard one first."
+                    : "Only an admin of the selected hospital can approve your application."}
+                </div>
+              </div>
+
+              {applyRole === "doctor" && (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Specialization *</label>
+                    <select
+                      value={applySpec}
+                      onChange={(e) => setApplySpec(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="">Select specialization</option>
+                      <option>Cardiology</option>
+                      <option>Oncology</option>
+                      <option>Neurology</option>
+                      <option>General Medicine</option>
+                      <option>Dermatology</option>
+                      <option>Orthopedics</option>
+                      <option>Endocrinology</option>
+                      <option>Pediatrics</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">NMC / MCI registration number *</label>
+                    <input
+                      type="text"
+                      value={applyLicense}
+                      onChange={(e) => setApplyLicense(e.target.value)}
+                      placeholder="MCI-12345"
+                      className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Qualifications *</label>
+                <input
+                  type="text"
+                  value={applyQualifications}
+                  onChange={(e) => setApplyQualifications(e.target.value)}
+                  placeholder={applyRole === "doctor" ? "MBBS, MD (Cardiology) — AIIMS Delhi, 2015" : "PhD Cancer Biology — IISc Bangalore"}
                   className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
                 />
               </div>
 
               {applyRole === "doctor" && (
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Specialization</label>
-                  <select
-                    value={applySpec}
-                    onChange={(e) => setApplySpec(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-teal-500"
-                  >
-                    <option value="">Select specialization</option>
-                    <option>Cardiology</option>
-                    <option>Oncology</option>
-                    <option>Neurology</option>
-                    <option>General Medicine</option>
-                    <option>Dermatology</option>
-                    <option>Orthopedics</option>
-                    <option>Endocrinology</option>
-                    <option>Pediatrics</option>
-                  </select>
+                  <label className="text-xs text-slate-400 mb-1 block">Years of experience *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={applyExperience}
+                    onChange={(e) => setApplyExperience(e.target.value)}
+                    placeholder="8"
+                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                  />
                 </div>
               )}
 
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">
-                  {applyRole === "doctor" ? "License number *" : "Institution / Credentials *"}
-                </label>
-                <input
-                  type="text"
-                  value={applyCred}
-                  onChange={(e) => setApplyCred(e.target.value)}
-                  placeholder={applyRole === "doctor" ? "MCI-12345" : "PhD, MIT Research Lab"}
-                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
-                />
-              </div>
+              <div className="border-t border-white/10 pt-3 mt-1">
+                <div className="text-xs text-slate-300 font-medium mb-2">Required documents (PDF / JPG / PNG)</div>
 
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Hospital *</label>
-                <input
-                  type="text"
-                  value={applyHospital}
-                  onChange={(e) => setApplyHospital(e.target.value)}
-                  placeholder="apollo-bangalore"
-                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
-                />
-                <div className="text-[10px] text-slate-500 mt-1">
-                  Exact hospital identifier registered by super admin. Case-insensitive. Only an admin from this hospital can approve you.
-                </div>
+                {applyRole === "doctor" ? (
+                  <div className="flex flex-col gap-2">
+                    <FileField label="NMC / MCI registration certificate *" file={docNmcCert} onChange={setDocNmcCert} />
+                    <FileField label="Degree certificate (MBBS / MD / MS) *" file={docDegreeCert} onChange={setDocDegreeCert} />
+                    <FileField label="Hospital appointment letter *" file={docAppointmentLetter} onChange={setDocAppointmentLetter} />
+                    <FileField label="Government photo ID *" file={docGovIdDoctor} onChange={setDocGovIdDoctor} />
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <FileField label="Credentials PDF (publications, CV, institutional letter) *" file={resCredentialsPdf} onChange={setResCredentialsPdf} />
+                    <FileField label="Government photo ID *" file={resGovId} onChange={setResGovId} />
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => { setShowApplyModal(false); setShowRoleModal(true); }}
-                className="flex-1 rounded-lg border border-white/10 py-2.5 text-sm text-slate-400 hover:bg-white/5 transition-colors"
+                disabled={registering}
+                className="flex-1 rounded-lg border border-white/10 py-2.5 text-sm text-slate-400 hover:bg-white/5 transition-colors disabled:opacity-50"
               >
                 Back
               </button>
               <button
                 onClick={handleApply}
-                disabled={registering || !applyName || !applyCred || !applyHospital}
+                disabled={registering || uploading}
                 className="flex-1 rounded-lg bg-teal-500 py-2.5 text-sm font-medium text-white hover:bg-teal-600 transition-colors disabled:opacity-50"
               >
                 {registering ? "Submitting..." : "Submit Application"}
