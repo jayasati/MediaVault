@@ -42,6 +42,7 @@ export default function PatientsTab() {
   const [uploadCategory, setUploadCategory] = useState(CATEGORY.LAB);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFileObj, setUploadFileObj] = useState(null);
+  const [uploadEmergency, setUploadEmergency] = useState(false);
   const [uploadingRecord, setUploadingRecord] = useState(false);
 
   // Prescription form
@@ -225,7 +226,8 @@ export default function PatientsTab() {
         contentHash,
         cid,
         uploadCategory,
-        uploadTitle.trim()
+        uploadTitle.trim(),
+        uploadEmergency
       );
       await tx.wait();
       toast.success("Record uploaded (verified)", { id: tid });
@@ -233,6 +235,7 @@ export default function PatientsTab() {
       setUploadFileObj(null);
       setUploadTitle("");
       setUploadCategory(CATEGORY.LAB);
+      setUploadEmergency(false);
       loadPatientRecords(selected.patientAddress);
     } catch (err) {
       console.error(err);
@@ -628,6 +631,20 @@ export default function PatientsTab() {
                   Encrypted with patient's wallet key before pinning to IPFS
                 </div>
               </div>
+              <label className="flex items-start gap-2 p-[10px] bg-[#FEF3C7] border border-[#FDE68A] rounded-[7px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={uploadEmergency}
+                  onChange={(e) => setUploadEmergency(e.target.checked)}
+                  className="accent-[#D97706] mt-0.5"
+                />
+                <div>
+                  <div className="text-[11px] font-medium text-[#78350F]">Mark as emergency-relevant</div>
+                  <div className="text-[9px] text-[#92400E] mt-0.5">
+                    Any ER doctor will be able to read this record via break-glass access (logged on-chain).
+                  </div>
+                </div>
+              </label>
             </div>
             <div className="flex gap-2 p-4 border-t border-[#e2e8f0] bg-[#f8fafc]">
               <button

@@ -3,9 +3,19 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./PatientRegistry.sol";
+import "./RoleManager.sol";
 
 contract EmergencyAccess is ReentrancyGuard {
     PatientRegistry public patientRegistry;
+    RoleManager public roleManager;
+
+    modifier onlyDoctor() {
+        require(
+            roleManager.getRole(msg.sender) == RoleManager.Role.DOCTOR,
+            "Only registered doctors can break glass"
+        );
+        _;
+    }
 
     struct EmergencyAccessRecord {
         uint256 accessId;
@@ -31,15 +41,16 @@ contract EmergencyAccess is ReentrancyGuard {
     );
     event PatientNotified(uint256 indexed accessId, address indexed patient);
 
-    constructor(address _patientRegistry) {
+    constructor(address _patientRegistry, address _roleManager) {
         patientRegistry = PatientRegistry(_patientRegistry);
+        roleManager = RoleManager(_roleManager);
     }
 
     function emergencyAccess(
         uint256 patientId,
         string calldata reason,
         string calldata location
-    ) external nonReentrant returns (string memory emergencyIPFSHash, string memory bloodType) {
+    ) external onlyDoctor nonReentrant returns (string memory emergencyIPFSHash, string memory bloodType) {
         require(bytes(reason).length > 0, "Reason is required");
 
         // Fetch patient — must exist and be active

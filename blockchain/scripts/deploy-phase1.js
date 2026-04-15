@@ -46,22 +46,22 @@ async function main() {
   const prescriptionManagerAddress = await prescriptionManager.getAddress();
   console.log("  PrescriptionManager deployed to:", prescriptionManagerAddress);
 
-  // 5. Deploy EmergencyAccess (needs PatientRegistry address)
-  console.log("\n[5/6] Deploying EmergencyAccess...");
-  const EmergencyAccess = await hre.ethers.getContractFactory("EmergencyAccess");
-  const emergencyAccess = await EmergencyAccess.deploy(patientRegistryAddress);
-  await emergencyAccess.waitForDeployment();
-  const emergencyAccessAddress = await emergencyAccess.getAddress();
-  console.log("  EmergencyAccess deployed to:", emergencyAccessAddress);
-
-  // 6. Deploy RoleManager
-  console.log("\n[6/8] Deploying RoleManager...");
+  // 5. Deploy RoleManager (needed by EmergencyAccess and ClinicalRecordManager)
+  console.log("\n[5/8] Deploying RoleManager...");
   const RoleManager = await hre.ethers.getContractFactory("RoleManager");
   const roleManager = await RoleManager.deploy();
   await roleManager.waitForDeployment();
   const roleManagerAddress = await roleManager.getAddress();
   console.log("  RoleManager deployed to:", roleManagerAddress);
   console.log("  Super Admin:", deployer.address);
+
+  // 6. Deploy EmergencyAccess (needs PatientRegistry + RoleManager)
+  console.log("\n[6/8] Deploying EmergencyAccess...");
+  const EmergencyAccess = await hre.ethers.getContractFactory("EmergencyAccess");
+  const emergencyAccess = await EmergencyAccess.deploy(patientRegistryAddress, roleManagerAddress);
+  await emergencyAccess.waitForDeployment();
+  const emergencyAccessAddress = await emergencyAccess.getAddress();
+  console.log("  EmergencyAccess deployed to:", emergencyAccessAddress);
 
   // 7. Deploy ClinicalRecordManager
   console.log("\n[7/8] Deploying ClinicalRecordManager...");

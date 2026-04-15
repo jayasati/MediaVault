@@ -5,6 +5,7 @@ import DoctorDashboard from "./pages/DoctorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 import ResearcherDashboard from "./pages/ResearcherDashboard";
+import EmergencyResponder from "./pages/EmergencyResponder";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <Route path="/admin" element={<AdminDashboard />} />
       <Route path="/super-admin" element={<SuperAdminDashboard />} />
       <Route path="/researcher" element={<ResearcherDashboard />} />
+      <Route path="/emergency/:patientId" element={<EmergencyResponder />} />
     </Routes>
   );
 }

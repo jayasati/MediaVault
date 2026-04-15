@@ -12,10 +12,18 @@ async function main() {
   const registryAddress = await registry.getAddress();
   console.log("PatientRegistry deployed to:", registryAddress);
 
+  // Deploy RoleManager (required by EmergencyAccess)
+  console.log("\nDeploying RoleManager...");
+  const RoleManager = await hre.ethers.getContractFactory("RoleManager");
+  const roleManager = await RoleManager.deploy();
+  await roleManager.waitForDeployment();
+  const roleManagerAddress = await roleManager.getAddress();
+  console.log("RoleManager deployed to:", roleManagerAddress);
+
   // Deploy EmergencyAccess
   console.log("\nDeploying EmergencyAccess...");
   const EmergencyAccess = await hre.ethers.getContractFactory("EmergencyAccess");
-  const emergencyAccess = await EmergencyAccess.deploy(registryAddress);
+  const emergencyAccess = await EmergencyAccess.deploy(registryAddress, roleManagerAddress);
   await emergencyAccess.waitForDeployment();
   const emergencyAddress = await emergencyAccess.getAddress();
   console.log("EmergencyAccess deployed to:", emergencyAddress);

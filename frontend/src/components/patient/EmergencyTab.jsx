@@ -4,6 +4,7 @@ import { Download, AlertTriangle, Heart, ExternalLink, Save } from "lucide-react
 import toast from "react-hot-toast";
 import useWallet from "@/hooks/useWallet";
 import useContract from "@/hooks/useContract";
+import useIPFS from "@/hooks/useIPFS";
 import { CONTRACTS } from "@/constants/contracts";
 
 const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
@@ -12,6 +13,7 @@ export default function EmergencyTab() {
   const { walletAddress } = useWallet();
   const registry = useContract("PatientRegistry");
   const emergencyAccess = useContract("EmergencyAccess");
+  const { uploadJSON } = useIPFS();
 
   const [patient, setPatient] = useState(null);
   const [bloodType, setBloodType] = useState("");
@@ -59,8 +61,15 @@ export default function EmergencyTab() {
     setSaving(true);
     const tid = toast.loading("Updating emergency profile...");
     try {
-      const ipfsData = JSON.stringify({ bloodType, allergies, emergencyContact });
-      const tx = await registry.updateEmergencyProfile(ipfsData);
+      toast.loading("Uploading emergency card to IPFS...", { id: tid });
+      const cid = await uploadJSON({ bloodType, allergies, emergencyContact });
+      if (!cid) {
+        toast.error("IPFS upload failed", { id: tid });
+        setSaving(false);
+        return;
+      }
+      toast.loading("Updating emergency profile...", { id: tid });
+      const tx = await registry.updateEmergencyProfile(cid);
       toast.loading("Waiting for confirmation...", { id: tid });
       await tx.wait();
       toast.success("Emergency profile updated", { id: tid });
@@ -116,10 +125,15 @@ export default function EmergencyTab() {
   };
 
   const patientId = patient ? Number(patient.patientId) : 0;
-  const emergencyAddress = CONTRACTS.EmergencyAccess?.address || "";
-  const qrData = patientId && emergencyAddress
-    ? `medivault://emergency/${patientId}/${emergencyAddress}`
+  const qrData = patientId
+    ? `${window.location.origin}/emergency/${patientId}`
     : "";
+
+  const handleCopyId = () => {
+    if (!patientId) return;
+    navigator.clipboard.writeText(String(patientId));
+    toast.success(`Copied patient ID: ${patientId}`);
+  };
 
   if (loading) {
     return (
@@ -146,8 +160,22 @@ export default function EmergencyTab() {
               </div>
             )}
           </div>
-          <div className="text-[10px] text-[#94a3b8] mt-3 text-center">
-            Encodes patient ID + contract address
+          {patientId > 0 && (
+            <div className="mt-3 w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-[8px] p-2 text-center">
+              <div className="text-[9px] uppercase tracking-wide text-[#94a3b8]">Patient ID</div>
+              <div className="flex items-center justify-center gap-2 mt-1">
+                <span className="text-[18px] font-bold text-[#0D9488] font-mono">#{patientId}</span>
+                <button
+                  onClick={handleCopyId}
+                  className="text-[10px] px-2 py-[3px] bg-white border border-[#cbd5e1] rounded-[5px] hover:bg-[#f1f5f9] text-[#64748b]"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="text-[10px] text-[#94a3b8] mt-2 text-center">
+            Scan opens <span className="font-mono">/emergency/{patientId || "…"}</span>
           </div>
           <button
             onClick={handleDownloadQR}

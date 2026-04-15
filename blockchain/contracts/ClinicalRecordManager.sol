@@ -50,6 +50,7 @@ contract ClinicalRecordManager is ReentrancyGuard {
         uint256 lastAmendedAt;
         string amendmentReason;
         bool isSuperseded;
+        bool isEmergencyRelevant;
     }
 
     uint256 private _recordIdCounter;
@@ -58,6 +59,7 @@ contract ClinicalRecordManager is ReentrancyGuard {
     mapping(address => uint256[]) private patientRecords;
     mapping(address => uint256[]) private doctorUploads;
     mapping(address => uint256[]) private doctorPendingRatifications;
+    mapping(address => uint256[]) private patientEmergencyRecords;
 
     // Treatment history
     mapping(address => address[]) private doctorPatientList;
@@ -103,7 +105,8 @@ contract ClinicalRecordManager is ReentrancyGuard {
         bytes32 contentHash,
         string calldata ipfsCID,
         RecordCategory category,
-        string calldata title
+        string calldata title,
+        bool isEmergencyRelevant
     ) external onlyDoctor nonReentrant returns (uint256) {
         require(patientAddress != address(0), "Invalid patient");
         require(
@@ -131,11 +134,13 @@ contract ClinicalRecordManager is ReentrancyGuard {
             uploadedAt: block.timestamp,
             lastAmendedAt: 0,
             amendmentReason: "",
-            isSuperseded: false
+            isSuperseded: false,
+            isEmergencyRelevant: isEmergencyRelevant
         });
 
         patientRecords[patientAddress].push(newId);
         doctorUploads[msg.sender].push(newId);
+        if (isEmergencyRelevant) patientEmergencyRecords[patientAddress].push(newId);
         _recordTreatment(msg.sender, patientAddress);
 
         emit RecordUploaded(newId, patientAddress, msg.sender, category);
@@ -177,7 +182,8 @@ contract ClinicalRecordManager is ReentrancyGuard {
             uploadedAt: block.timestamp,
             lastAmendedAt: 0,
             amendmentReason: "",
-            isSuperseded: false
+            isSuperseded: false,
+            isEmergencyRelevant: false
         });
 
         patientRecords[msg.sender].push(newId);
@@ -254,7 +260,8 @@ contract ClinicalRecordManager is ReentrancyGuard {
             uploadedAt: block.timestamp,
             lastAmendedAt: block.timestamp,
             amendmentReason: reason,
-            isSuperseded: false
+            isSuperseded: false,
+            isEmergencyRelevant: old.isEmergencyRelevant
         });
 
         old.isSuperseded = true;
@@ -321,6 +328,23 @@ contract ClinicalRecordManager is ReentrancyGuard {
 
     function getPatientRecords(address patient) external view returns (uint256[] memory) {
         return patientRecords[patient];
+    }
+
+    function getPatientEmergencyRecords(address patient) external view returns (uint256[] memory) {
+        // Return non-superseded emergency-flagged records only
+        uint256[] storage all = patientEmergencyRecords[patient];
+        uint256 count = 0;
+        for (uint256 i = 0; i < all.length; i++) {
+            if (!records[all[i]].isSuperseded && records[all[i]].status == RecordStatus.CLINICAL) count++;
+        }
+        uint256[] memory result = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < all.length; i++) {
+            if (!records[all[i]].isSuperseded && records[all[i]].status == RecordStatus.CLINICAL) {
+                result[idx++] = all[i];
+            }
+        }
+        return result;
     }
 
     function getDoctorUploads(address doctor) external view returns (uint256[] memory) {

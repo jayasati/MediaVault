@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Calendar,
   User,
+  Siren,
 } from "lucide-react";
 import useWallet from "@/hooks/useWallet";
 import useRoleGuard from "@/hooks/useRoleGuard";
@@ -22,11 +23,13 @@ import OpinionsTab from "@/components/doctor/OpinionsTab";
 import ReputationTab from "@/components/doctor/ReputationTab";
 import AppointmentsTab from "@/components/doctor/AppointmentsTab";
 import ProfileSetupTab from "@/components/doctor/ProfileSetupTab";
+import EmergencyAccessTab from "@/components/doctor/EmergencyAccessTab";
 
 const TABS = [
   { id: "appointments", label: "Appointments", icon: Calendar },
   { id: "patients", label: "My patients", icon: Users },
   { id: "access", label: "Access requests", icon: Star },
+  { id: "emergency", label: "Emergency", icon: Siren },
   { id: "prescriptions", label: "Prescriptions", icon: ClipboardList },
   { id: "opinions", label: "Opinions", icon: MessageSquare },
   { id: "reputation", label: "Reputation", icon: Award },
@@ -37,6 +40,7 @@ const TAB_COMPONENTS = {
   appointments: AppointmentsTab,
   patients: PatientsTab,
   access: AccessRequestsTab,
+  emergency: EmergencyAccessTab,
   prescriptions: PrescriptionsWrittenTab,
   opinions: OpinionsTab,
   reputation: ReputationTab,
